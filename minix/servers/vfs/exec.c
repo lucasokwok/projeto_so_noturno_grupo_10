@@ -246,7 +246,7 @@ int pm_exec(vir_bytes path, size_t path_len, vir_bytes frame, size_t frame_len,
   strlcpy(finalexec, fullpath, PATH_MAX);
   strlcpy(firstexec, fullpath, PATH_MAX);
 
-  //Aqui tem a informação do caminho e arquivo que contém o código-fonte dos comandos
+  /* Aqui tem a informação do caminho e arquivo que contém o código-fonte dos comandos */
   printf("Executando: %s\n", fullpath);
 
   /* Get_read_vp will return an opened vn in execi.

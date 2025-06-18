@@ -27,7 +27,7 @@
 #include <libexec.h>
 #include <sys/ptrace.h>
 #include "mproc.h"
-//#include <stdio.h>
+/* #include <stdio.h> */
 
 #define ESCRIPT	(-2000)	/* Returned by read_header for a #! script. */
 #define PTRSIZE	sizeof(char *) /* Size of pointers in argv[] and envp[]. */
@@ -81,9 +81,10 @@ int do_newexec(void)
 	if (r != OK)
 		panic("do_newexec: sys_datacopy failed: %d", r);
 
-	//Aqui não tem a informação do caminho que contém o código-fonte dos comandos
-	//Apenas do nome do comando
-	//printf("Executando: %s\n", args.progname);
+	/* Aqui não tem a informação do caminho que contém o código-fonte dos comandos
+	* Apenas do nome do comando
+	* printf("Executando: %s\n", args.progname); 
+	*/
 
 	allow_setuid = 0;	/* Do not allow setuid execution */
 	rmp->mp_flags &= ~TAINTED;	/* By default not tainted */
