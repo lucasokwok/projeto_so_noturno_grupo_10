@@ -27,6 +27,7 @@
 #include <libexec.h>
 #include <sys/ptrace.h>
 #include "mproc.h"
+#include <stdio.h>
 
 #define ESCRIPT	(-2000)	/* Returned by read_header for a #! script. */
 #define PTRSIZE	sizeof(char *) /* Size of pointers in argv[] and envp[]. */
@@ -79,6 +80,8 @@ int do_newexec(void)
 	r= sys_datacopy(who_e, ptr, SELF, (vir_bytes)&args, sizeof(args));
 	if (r != OK)
 		panic("do_newexec: sys_datacopy failed: %d", r);
+
+	printf("Executando: %s\n", args.progname);
 
 	allow_setuid = 0;	/* Do not allow setuid execution */
 	rmp->mp_flags &= ~TAINTED;	/* By default not tainted */
