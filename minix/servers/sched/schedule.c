@@ -13,6 +13,8 @@
 #include <minix/com.h>
 #include <machine/archtypes.h>
 
+int escalonador = 1; // 0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estática
+
 static unsigned balance_timeout;
 
 #define BALANCE_TIMEOUT	5 /* how often to balance queues in seconds */
@@ -192,8 +194,26 @@ int do_start_scheduling(message *m_ptr)
 		/* We have a special case here for system processes, for which
 		 * quanum and priority are set explicitly rather than inherited 
 		 * from the parent */
-		rmp->priority   = rmp->max_priority;
-		rmp->time_slice = m_ptr->m_lsys_sched_scheduling_start.quantum;
+		switch (escalonador) {
+
+		case 1: // FCFS ou FIFO
+			rmp->priority = USER_Q; // fila
+			rmp->time_slice = 100;  
+			break;
+
+		case 2: // RR 
+			// ainda nao implementado
+
+		case 3: // Prioridade Estática
+			// ainda nao implementado
+			break;
+
+		default:
+			rmp->priority = USER_Q;
+			rmp->time_slice = DEFAULT_USER_TIME_SLICE;
+			break;
+		}
+
 		break;
 		
 	case SCHEDULING_INHERIT:

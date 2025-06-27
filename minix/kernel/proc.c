@@ -41,6 +41,11 @@
 
 #include <minix/syslib.h>
 
+int escalonador = 1; // 0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estática
+
+struct proc *fifo_inicio = NULL;
+struct proc *fifo_fim = NULL;
+
 /* Scheduling and message passing functions */
 static void idle(void);
 /**
@@ -1592,70 +1597,92 @@ asyn_error:
 /*===========================================================================*
  *				enqueue					     * 
  *===========================================================================*/
-void enqueue(
-  register struct proc *rp	/* this process is now runnable */
-)
+void enqueue(register struct proc *rp /* this process is now runnable */)
 {
-/* Add 'rp' to one of the queues of runnable processes.  This function is 
- * responsible for inserting a process into one of the scheduling queues. 
- * The mechanism is implemented here.   The actual scheduling policy is
- * defined in sched() and pick_proc().
- *
- * This function can be used x-cpu as it always uses the queues of the cpu the
- * process is assigned to.
- */
-  int q = rp->p_priority;	 		/* scheduling queue to use */
+  /* Add 'rp' to one of the queues of runnable processes.  This function is 
+   * responsible for inserting a process into one of the scheduling queues. 
+   * The mechanism is implemented here.   The actual scheduling policy is
+   * defined in sched() and pick_proc().
+   *
+   * This function can be used x-cpu as it always uses the queues of the cpu the
+   * process is assigned to.
+   */
   struct proc **rdy_head, **rdy_tail;
-  
+
   assert(proc_is_runnable(rp));
 
-  assert(q >= 0);
+  switch (escalonador) {
+    case 1: // FCFS (FIFO)
+      rp->p_nextready = NULL;
 
-  rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
-  rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
+      if (fifo_fim != NULL)
+        fifo_fim->p_nextready = rp;// se ja tem processo na fila vai pro final
+      else
+        fifo_inicio = rp;// senao processo vai pra primeiro da fila
 
-  /* Now add the process to the queue. */
-  if (!rdy_head[q]) {		/* add to empty queue */
-      rdy_head[q] = rdy_tail[q] = rp; 		/* create a new queue */
-      rp->p_nextready = NULL;		/* mark new end */
-  } 
-  else {					/* add to tail of queue */
-      rdy_tail[q]->p_nextready = rp;		/* chain tail of queue */	
-      rdy_tail[q] = rp;				/* set new queue tail */
-      rp->p_nextready = NULL;		/* mark new end */
+      fifo_fim = rp;
+      break;
+
+    case 2: // Round Robin (RR)
+      // ainda não implementado
+      break;
+
+    case 3: // Prioridade 
+      // ainda não implementado
+      break;
+
+    default:
+      /* Comportamento padrão do Minix (Round-Robin com múltiplas filas) */
+      int q = rp->p_priority;	 		/* scheduling queue to use */
+
+      assert(q >= 0);
+
+      rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
+      rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
+
+      /* Now add the process to the queue. */
+      if (!rdy_head[q]) {		/* add to empty queue */
+          rdy_head[q] = rdy_tail[q] = rp; 		/* create a new queue */
+          rp->p_nextready = NULL;		/* mark new end */
+      } 
+      else {					/* add to tail of queue */
+          rdy_tail[q]->p_nextready = rp;		/* chain tail of queue */	
+          rdy_tail[q] = rp;				/* set new queue tail */
+          rp->p_nextready = NULL;		/* mark new end */
+      }
+
+      if (cpuid == rp->p_cpu) {
+          /*
+           * enqueueing a process with a higher priority than the current one,
+           * it gets preempted. The current process must be preemptible. Testing
+           * the priority also makes sure that a process does not preempt itself
+           */
+          struct proc * p;
+          p = get_cpulocal_var(proc_ptr);
+          assert(p);
+          if((p->p_priority > rp->p_priority) &&
+                  (priv(p)->s_flags & PREEMPTIBLE))
+              RTS_SET(p, RTS_PREEMPTED); /* calls dequeue() */
+      }
+    #ifdef CONFIG_SMP
+      /*
+       * if the process was enqueued on a different cpu and the cpu is idle, i.e.
+       * the time is off, we need to wake up that cpu and let it schedule this new
+       * process
+       */
+      else if (get_cpu_var(rp->p_cpu, cpu_is_idle)) {
+          smp_schedule(rp->p_cpu);
+      }
+    #endif
+
+      /* Make note of when this process was added to queue */
+      read_tsc_64(&(get_cpulocal_var(proc_ptr)->p_accounting.enter_queue));
+
+    #if DEBUG_SANITYCHECKS
+      assert(runqueues_ok_local());
+    #endif
+      break;
   }
-
-  if (cpuid == rp->p_cpu) {
-	  /*
-	   * enqueueing a process with a higher priority than the current one,
-	   * it gets preempted. The current process must be preemptible. Testing
-	   * the priority also makes sure that a process does not preempt itself
-	   */
-	  struct proc * p;
-	  p = get_cpulocal_var(proc_ptr);
-	  assert(p);
-	  if((p->p_priority > rp->p_priority) &&
-			  (priv(p)->s_flags & PREEMPTIBLE))
-		  RTS_SET(p, RTS_PREEMPTED); /* calls dequeue() */
-  }
-#ifdef CONFIG_SMP
-  /*
-   * if the process was enqueued on a different cpu and the cpu is idle, i.e.
-   * the time is off, we need to wake up that cpu and let it schedule this new
-   * process
-   */
-  else if (get_cpu_var(rp->p_cpu, cpu_is_idle)) {
-	  smp_schedule(rp->p_cpu);
-  }
-#endif
-
-  /* Make note of when this process was added to queue */
-  read_tsc_64(&(get_cpulocal_var(proc_ptr)->p_accounting.enter_queue));
-
-
-#if DEBUG_SANITYCHECKS
-  assert(runqueues_ok_local());
-#endif
 }
 
 /*===========================================================================*
@@ -1715,6 +1742,7 @@ static void enqueue_head(struct proc *rp)
  *===========================================================================*/
 void dequeue(struct proc *rp)
 /* this process is no longer runnable */
+// nao fazer alteracoes aqui para o FIFO pois eh nao preemptivo
 {
 /* A process must be removed from the scheduling queues, for example, because
  * it has blocked.  If the currently active process is removed, a new process
@@ -1784,31 +1812,47 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
-/* Decide who to run now.  A new process is selected and returned.
- * When a billable process is selected, record it in 'bill_ptr', so that the 
- * clock task can tell who to bill for system time.
- *
- * This function always uses the run queues of the local cpu!
- */
-  register struct proc *rp;			/* process to run */
+  register struct proc *rp;
   struct proc **rdy_head;
-  int q;				/* iterate over queues */
+  int q;
 
-  /* Check each of the scheduling queues for ready processes. The number of
-   * queues is defined in proc.h, and priorities are set in the task table.
-   * If there are no processes ready to run, return NULL.
-   */
   rdy_head = get_cpulocal_var(run_q_head);
-  for (q=0; q < NR_SCHED_QUEUES; q++) {	
-	if(!(rp = rdy_head[q])) {
-		TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
-		continue;
-	}
-	assert(proc_is_runnable(rp));
-	if (priv(rp)->s_flags & BILLABLE)	 	
-		get_cpulocal_var(bill_ptr) = rp; /* bill for system time */
-	return rp;
+
+  switch (escalonador) {
+	case 1: // FCFS FIFO
+		if ((rp = fifo_inicio) != NULL) { //verifica fila nao vazia
+			if (priv(rp)->s_flags & BILLABLE)
+				get_cpulocal_var(bill_ptr) = rp;
+			fifo_inicio = rp->p_nextready;
+			if (fifo_inicio == NULL) fifo_fim = NULL; // fila vazia
+				rp->p_nextready = NULL;
+			return rp;
+		}
+		break;
+
+    case 2: // Round Robin (RR)
+      //ainda nao implementado
+      break;
+
+    case 3: // Prioridade 
+      // ainda nao implementado
+      break;
+
+    default:
+      // padrao minix
+      for (q = 0; q < NR_SCHED_QUEUES; q++) {
+        if (!(rp = rdy_head[q])) {
+          TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
+          continue;
+        }
+        assert(proc_is_runnable(rp));
+        if (priv(rp)->s_flags & BILLABLE)
+          get_cpulocal_var(bill_ptr) = rp;
+        return rp;
+      }
+      break;
   }
+
   return NULL;
 }
 
