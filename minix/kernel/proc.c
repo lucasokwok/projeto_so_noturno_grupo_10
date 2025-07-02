@@ -1838,19 +1838,21 @@ static struct proc * pick_proc(void)
       // ainda nao implementado
       break;
 
-    default:
-      // padrao minix
-      for (q = 0; q < NR_SCHED_QUEUES; q++) {
-        if (!(rp = rdy_head[q])) {
-          TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
-          continue;
-        }
-        assert(proc_is_runnable(rp));
-        if (priv(rp)->s_flags & BILLABLE)
-          get_cpulocal_var(bill_ptr) = rp;
-        return rp;
-      }
-      break;
+    default:{
+		// padrao minix
+		for (q = 0; q < NR_SCHED_QUEUES; q++) {
+			if (!(rp = rdy_head[q])) {
+			TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
+			continue;
+			}
+			assert(proc_is_runnable(rp));
+			if (priv(rp)->s_flags & BILLABLE)
+			get_cpulocal_var(bill_ptr) = rp;
+			return rp;
+		}
+		break;
+	}
+      
   }
 
   return NULL;
