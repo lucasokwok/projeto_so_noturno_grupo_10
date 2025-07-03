@@ -1820,13 +1820,17 @@ static struct proc * pick_proc(void)
 
   switch (escalonador) {
 	case 1: // FCFS FIFO
-		if ((rp = fifo_inicio) != NULL) { //verifica fila nao vazia
-			if (priv(rp)->s_flags & BILLABLE)
-				get_cpulocal_var(bill_ptr) = rp;
+		while ((rp = fifo_inicio) != NULL) { //verifica fila nao vazia
 			fifo_inicio = rp->p_nextready;
 			if (fifo_inicio == NULL) fifo_fim = NULL; // fila vazia
-				rp->p_nextready = NULL;
-			return rp;
+			rp->p_nextready = NULL;
+
+			if (proc_is_runnable(rp)) { //corrige erro de processo nao runnable ser escalonado
+				if (priv(rp)->s_flags & BILLABLE)
+					get_cpulocal_var(bill_ptr) = rp;
+				return rp;
+			}
+			// se nao runnable, ignora e tenta o próximo
 		}
 		break;
 
