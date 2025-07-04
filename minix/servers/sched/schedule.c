@@ -12,6 +12,11 @@
 #include <assert.h>
 #include <minix/com.h>
 #include <machine/archtypes.h>
+#include <limits.h>  
+
+int escalonador = 1; // 0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estática
+
+static int fcfs_ativo(void) { return escalonador == 1; }
 
 static unsigned balance_timeout;
 
@@ -96,6 +101,13 @@ int do_noquantum(message *m_ptr)
 	}
 
 	rmp = &schedproc[proc_nr_n];
+
+	/* ---------- FCFS: recarrega quantum, sem mexer na prioridade ----- */
+	if (fcfs_active()) {
+		rmp->time_slice = INT_MAX;                 
+		return schedule_process_local(rmp);        
+	}
+
 	if (rmp->priority < MIN_USER_Q) {
 		rmp->priority += 1; /* lower priority */
 	}
@@ -212,6 +224,10 @@ int do_start_scheduling(message *m_ptr)
 		/* not reachable */
 		assert(0);
 	}
+
+	/* ---------- FCFS: quantum infinito ---------- */
+	if (fcfs_active() && rmp->priority >= USER_Q)
+		rmp->time_slice = INT_MAX;      /* nunca zera */
 
 	/* Take over scheduling the process. The kernel reply message populates
 	 * the processes current priority and its time slice */
