@@ -226,7 +226,7 @@ int do_start_scheduling(message *m_ptr)
 	}
 
 	/* ---------- FCFS: quantum infinito ---------- */
-	if (fcfs_active() && rmp->priority >= USER_Q)
+	if (fcfs_ativo() && rmp->priority >= USER_Q)
 		rmp->time_slice = INT_MAX;      /* nunca zera */
 
 	/* Take over scheduling the process. The kernel reply message populates
