@@ -103,7 +103,7 @@ int do_noquantum(message *m_ptr)
 	rmp = &schedproc[proc_nr_n];
 
 	/* ---------- FCFS: recarrega quantum, sem mexer na prioridade ----- */
-	if (fcfs_active()) {
+	if (fcfs_ativo()) {
 		rmp->time_slice = INT_MAX;                 
 		return schedule_process_local(rmp);        
 	}
