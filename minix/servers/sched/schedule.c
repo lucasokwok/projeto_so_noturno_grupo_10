@@ -14,9 +14,12 @@
 #include <machine/archtypes.h>
 #include <limits.h>  
 
-int escalonador = 1; // 0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estática
+int escalonador = 1; /*0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estatica*/ 
 
 static int fcfs_ativo(void) { return escalonador == 1; }
+static int rr_ativo(void){ return escalonador == 2; }
+
+#define RR_QUANTUM   50     
 
 static unsigned balance_timeout;
 
@@ -107,6 +110,12 @@ int do_noquantum(message *m_ptr)
 		rmp->time_slice = INT_MAX;                 
 		return schedule_process_local(rmp);        
 	}
+
+	/* --------- RR: reinicia quantum, sem mexer na prioridade ------------------- */
+    if (rr_active()) {
+        rmp->time_slice = RR_QUANTUM;
+        return schedule_process_local(rmp);
+    }
 
 	if (rmp->priority < MIN_USER_Q) {
 		rmp->priority += 1; /* lower priority */
@@ -228,6 +237,8 @@ int do_start_scheduling(message *m_ptr)
 	/* ---------- FCFS: quantum infinito ---------- */
 	if (fcfs_ativo() && rmp->priority >= USER_Q)
 		rmp->time_slice = INT_MAX;      /* nunca zera */
+	else if (rr_ativo() && rmp->priority >= USER_Q)
+        rmp->time_slice = RR_QUANTUM;   /* preemptivo */
 
 	/* Take over scheduling the process. The kernel reply message populates
 	 * the processes current priority and its time slice */

@@ -41,10 +41,13 @@
 
 #include <minix/syslib.h>
 
-int escalonador = 1; // 0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estática
+int escalonador = 1; /* 0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estática */ 
 
 static struct proc *fifo_inicio = NULL; //inicio fila
 static struct proc *fifo_fim = NULL; //fim fila
+
+static int fcfs_ativo(void) { return escalonador == 1; }
+static int rr_ativo  (void) { return escalonador == 2; }
 
 /* Scheduling and message passing functions */
 static void idle(void);
@@ -1601,8 +1604,8 @@ void enqueue(
   register struct proc *rp	/* this process is now runnable */
 )
 {
-	 /* ---------- FCFS ---------- */
-    if (escalonador == 1) {
+	 /* ---------- FCFS e RR---------- */
+    if (fcfs_ativo() || rr_ativo()) {
         assert(proc_is_runnable(rp));
         rp->p_nextready = NULL;
 
@@ -1734,8 +1737,8 @@ static void enqueue_head(struct proc *rp)
 void dequeue(struct proc *rp)
 /* this process is no longer runnable */
 {
-	/* ---------- FCFS ---------- */
-    if (escalonador == 1) {
+	/* ---------- FCFS e RR---------- */
+    if (fcfs_ativo() || rr_ativo()) {
         struct proc *ant = NULL, *cur = fifo_inicio;
 
         while (cur) {
@@ -1823,8 +1826,8 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
-	/* ---------- FCFS ---------- */
-    if (escalonador == 1) {
+	/* ---------- FCFS e RR---------- */
+    if (fcfs_ativo() || rr_ativo()) {
         struct proc *rp = fifo_inicio;
         if (!rp) return NULL;           /* fila vazia  */
 
