@@ -41,13 +41,14 @@
 
 #include <minix/syslib.h>
 
-int escalonador = 1; /* 0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estática */ 
+int escalonador = 1; /* 0 = Padrao, 1 = FCFS, 2 = Round Robin(RR), 3 = Lottery */ 
 
-static struct proc *fifo_inicio = NULL; //inicio fila
-static struct proc *fifo_fim = NULL; //fim fila
+static struct proc *fila_inicio = NULL; //inicio fila
+static struct proc *fila_fim = NULL; //fim fila
 
 static int fcfs_ativo(void) { return escalonador == 1; }
 static int rr_ativo  (void) { return escalonador == 2; }
+static int lottery_ativo(void){ return escalonador == 3; }
 
 /* Scheduling and message passing functions */
 static void idle(void);
@@ -1605,16 +1606,16 @@ void enqueue(
 )
 {
 	 /* ---------- FCFS e RR---------- */
-    if (fcfs_ativo() || rr_ativo()) {
+    if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
         assert(proc_is_runnable(rp));
         rp->p_nextready = NULL;
 
-        if (fifo_fim)
-            fifo_fim->p_nextready = rp; /* encadeia no fim da fila */
+        if (fila_fim)
+            fila_fim->p_nextready = rp; /* encadeia no fim da fila */
         else
-            fifo_inicio = rp;           /* primeiro processo */
+            fila_inicio = rp;           /* primeiro processo */
 
-        fifo_fim = rp;
+        fila_fim = rp;
         return;                         
     }
 /* Add 'rp' to one of the queues of runnable processes.  This function is 
@@ -1738,8 +1739,8 @@ void dequeue(struct proc *rp)
 /* this process is no longer runnable */
 {
 	/* ---------- FCFS e RR---------- */
-    if (fcfs_ativo() || rr_ativo()) {
-        struct proc *ant = NULL, *cur = fifo_inicio;
+    if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
+        struct proc *ant = NULL, *cur = fila_inicio;
 
         while (cur) {
             if (cur == rp) {
@@ -1747,10 +1748,10 @@ void dequeue(struct proc *rp)
                 if (ant) 
 					ant->p_nextready = cur->p_nextready;
                 else     
-					fifo_inicio = cur->p_nextready;
+					fila_inicio = cur->p_nextready;
 
-                if (cur == fifo_fim) 
-					fifo_fim = ant;
+                if (cur == fila_fim) 
+					fila_fim = ant;
                 break;
             }
             ant = cur;
@@ -1828,18 +1829,47 @@ static struct proc * pick_proc(void)
 {
 	/* ---------- FCFS e RR---------- */
     if (fcfs_ativo() || rr_ativo()) {
-        struct proc *rp = fifo_inicio;
+        struct proc *rp = fila_inicio;
         if (!rp) return NULL;           /* fila vazia  */
 
-        fifo_inicio = rp->p_nextready;
-        if (!fifo_inicio) 
-			fifo_fim = NULL;
+        fila_inicio = rp->p_nextready;
+        if (!fila_inicio) 
+			fila_fim = NULL;
         rp->p_nextready = NULL;
 
         if (priv(rp)->s_flags & BILLABLE)
             get_cpulocal_var(bill_ptr) = rp;
 
         return rp;
+    }
+
+	if (lottery_ativo()) {
+        if (!fila_inicio) return NULL;
+
+        /* 1 bilhete por processo  */
+        int total = 0;
+        struct proc *cur;
+        for (cur = fila_inicio; cur; cur = cur->p_nextready) total++;
+
+        /* sorteia [0, total-1] */
+        unsigned long idx = random32() % total;
+
+        /* varre ate o elemento escolhido */
+        struct proc *prev = NULL;
+        cur = fila_inicio;
+        while (idx--) { prev = cur; cur = cur->p_nextready; }
+
+        if (prev) 
+			prev->p_nextready = cur->p_nextready;
+        else 
+			fila_inicio = cur->p_nextready;
+        if (cur == fila_fim) 
+			fila_fim = prev;
+        cur->p_nextready = NULL;
+
+        if (priv(cur)->s_flags & BILLABLE)
+            get_cpulocal_var(bill_ptr) = cur;
+        return cur;
     }
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 

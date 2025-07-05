@@ -14,10 +14,11 @@
 #include <machine/archtypes.h>
 #include <limits.h>  
 
-int escalonador = 1; /*0 = Padrao, 1 = FCFS(FIFO), 2 = Round Robin(RR), 3 = Prioridade Estatica*/ 
+int escalonador = 1; /*0 = Padrao, 1 = FCFS, 2 = Round Robin(RR), 3 = Lottery*/ 
 
 static int fcfs_ativo(void) { return escalonador == 1; }
 static int rr_ativo(void){ return escalonador == 2; }
+static int lottery_ativo(void){ return escalonador == 3; }
 
 #define RR_QUANTUM   50     
 
@@ -111,8 +112,8 @@ int do_noquantum(message *m_ptr)
 		return schedule_process_local(rmp);        
 	}
 
-	/* --------- RR: reinicia quantum, sem mexer na prioridade ------------------- */
-    if (rr_active()) {
+	/* --------- RR e LOTTERY: reinicia quantum, sem mexer na prioridade ------------------- */
+    if (rr_ativo() || lottery_ativo()) {
         rmp->time_slice = RR_QUANTUM;
         return schedule_process_local(rmp);
     }
@@ -237,7 +238,7 @@ int do_start_scheduling(message *m_ptr)
 	/* ---------- FCFS: quantum infinito ---------- */
 	if (fcfs_ativo() && rmp->priority >= USER_Q)
 		rmp->time_slice = INT_MAX;      /* nunca zera */
-	else if (rr_ativo() && rmp->priority >= USER_Q)
+	else if ((rr_ativo() || lottery_ativo()) && rmp->priority >= USER_Q)
         rmp->time_slice = RR_QUANTUM;   /* preemptivo */
 
 	/* Take over scheduling the process. The kernel reply message populates
