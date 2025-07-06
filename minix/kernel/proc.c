@@ -40,6 +40,7 @@
 #include "arch_proto.h"
 
 #include <minix/syslib.h>
+#include "random.h"  
 
 int escalonador = 1; /* 0 = Padrao, 1 = FCFS, 2 = Round Robin(RR), 3 = Lottery */ 
 
