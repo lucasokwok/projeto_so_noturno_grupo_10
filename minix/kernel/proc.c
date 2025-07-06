@@ -40,7 +40,6 @@
 #include "arch_proto.h"
 
 #include <minix/syslib.h>
-#include "random.h"  
 
 int escalonador = 1; /* 0 = Padrao, 1 = FCFS, 2 = Round Robin(RR), 3 = Lottery */ 
 
@@ -50,6 +49,15 @@ static struct proc *fila_fim = NULL; //fim fila
 static int fcfs_ativo(void) { return escalonador == 1; }
 static int rr_ativo  (void) { return escalonador == 2; }
 static int lottery_ativo(void){ return escalonador == 3; }
+
+static unsigned seed = 123456789;          
+
+static inline unsigned sorteia(unsigned total)   
+{
+    seed = seed * 1664525u + 1013904223u;        
+    return (seed >> 16) % total;              
+}
+
 
 /* Scheduling and message passing functions */
 static void idle(void);
@@ -1853,12 +1861,17 @@ static struct proc * pick_proc(void)
         for (cur = fila_inicio; cur; cur = cur->p_nextready) total++;
 
         /* sorteia [0, total-1] */
-        unsigned long idx = random32() % total;
+        unsigned idx = sorteia(total);
 
         /* varre ate o elemento escolhido */
         struct proc *prev = NULL;
         cur = fila_inicio;
-        while (idx--) { prev = cur; cur = cur->p_nextready; }
+        prev = NULL;
+		for (unsigned i = 0; i < idx; i++) {
+			prev = cur;
+			cur  = cur->p_nextready;
+		}
+
 
         if (prev) 
 			prev->p_nextready = cur->p_nextready;
