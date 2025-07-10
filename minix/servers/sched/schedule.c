@@ -13,7 +13,12 @@
 #include <minix/com.h>
 #include <machine/archtypes.h>
 #include <limits.h>  
-#include "../../kernel/proc.h"
+
+int escalonador = 1;  /* 0 = Padrão, 1 = FCFS, 2 = RR, 3 = Lottery */
+
+int fcfs_ativo(void)   { return escalonador == 1; }
+int rr_ativo(void)     { return escalonador == 2; }
+int lottery_ativo(void){ return escalonador == 3; }
 
 #define RR_QUANTUM   50     
 

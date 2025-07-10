@@ -285,11 +285,6 @@ EXTERN struct proc proc[NR_TASKS + NR_PROCS];	/* process table */
 int mini_send(struct proc *caller_ptr, endpoint_t dst_e, message *m_ptr,
 	int flags);
 	
-extern int escalonador;          
-int fcfs_ativo(void);
-int rr_ativo(void);
-int lottery_ativo(void);
-
 #endif /* __ASSEMBLY__ */
 
 #endif /* PROC_H */
