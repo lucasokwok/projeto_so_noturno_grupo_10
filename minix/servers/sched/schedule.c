@@ -14,7 +14,7 @@
 #include <machine/archtypes.h>
 #include <limits.h>  
 
-int escalonador = 1;  /* 0 = Padrão, 1 = FCFS, 2 = RR, 3 = Lottery */
+int escalonador = 0;  /* 0 = Padrão, 1 = FCFS, 2 = RR, 3 = Lottery */
 
 int fcfs_ativo(void)   { return escalonador == 1; }
 int rr_ativo(void)     { return escalonador == 2; }
