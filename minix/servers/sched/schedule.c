@@ -13,12 +13,7 @@
 #include <minix/com.h>
 #include <machine/archtypes.h>
 #include <limits.h>  
-
-int escalonador = 1; /*0 = Padrao, 1 = FCFS, 2 = Round Robin(RR), 3 = Lottery*/ 
-
-static int fcfs_ativo(void) { return escalonador == 1; }
-static int rr_ativo(void){ return escalonador == 2; }
-static int lottery_ativo(void){ return escalonador == 3; }
+#include <minix/proc.h>
 
 #define RR_QUANTUM   50     
 

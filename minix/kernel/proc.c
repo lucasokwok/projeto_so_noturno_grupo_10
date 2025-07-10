@@ -41,14 +41,22 @@
 
 #include <minix/syslib.h>
 
-int escalonador = 1; /* 0 = Padrao, 1 = FCFS, 2 = Round Robin(RR), 3 = Lottery */ 
+#include "sched.h"    
+
+int escalonador = 1;  /* 0 = Padrão, 1 = FCFS, 2 = RR, 3 = Lottery */
+
+int fcfs_ativo(void)   { return escalonador == 1; }
+int rr_ativo(void)     { return escalonador == 2; }
+int lottery_ativo(void){ return escalonador == 3; }
+
+/*
+static int fcfs_ativo(void) { return escalonador_global  == 1; }
+static int rr_ativo  (void) { return escalonador_global  == 2; }
+static int lottery_ativo(void){ return escalonador_global  == 3; }
+*/
 
 static struct proc *fila_inicio = NULL; //inicio fila
 static struct proc *fila_fim = NULL; //fim fila
-
-static int fcfs_ativo(void) { return escalonador == 1; }
-static int rr_ativo  (void) { return escalonador == 2; }
-static int lottery_ativo(void){ return escalonador == 3; }
 
 static unsigned seed = 123456789;          
 
@@ -1858,7 +1866,8 @@ static struct proc * pick_proc(void)
         /* 1 bilhete por processo  */
         int total = 0;
         struct proc *cur;
-        for (cur = fila_inicio; cur; cur = cur->p_nextready) total++;
+        for (cur = fila_inicio; cur; cur = cur->p_nextready) 
+			total++;
 
         /* sorteia [0, total-1] */
         unsigned idx = sorteia(total);
