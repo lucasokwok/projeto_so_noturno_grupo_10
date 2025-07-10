@@ -13,7 +13,7 @@
 #include <minix/com.h>
 #include <machine/archtypes.h>
 #include <limits.h>  
-#include <minix/proc.h>
+#include "../kernel/proc.h"
 
 #define RR_QUANTUM   50     
 
