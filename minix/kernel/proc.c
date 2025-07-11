@@ -41,7 +41,7 @@
 
 #include <minix/syslib.h>
 
-int escalonador = 0;  /* 0 = Padrão, 1 = FCFS, 2 = RR, 3 = Lottery */
+int escalonador = 3;  /* 0 = Padrão, 1 = FCFS, 2 = RR, 3 = Lottery */
 
 int fcfs_ativo(void)   { return escalonador == 1; }
 int rr_ativo(void)     { return escalonador == 2; }
@@ -83,6 +83,7 @@ static int try_one(endpoint_t receive_e, struct proc *src_ptr,
 	struct proc *dst_ptr);
 static struct proc * pick_proc(void);
 static void enqueue_head(struct proc *rp);
+static void enqueue_tail(struct proc *rp);
 
 /* all idles share the same idle_priv structure */
 static struct priv idle_priv;
@@ -1622,16 +1623,8 @@ void enqueue(
 {
 	 /* ---------- FCFS e RR---------- */
     if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
-        assert(proc_is_runnable(rp));
-        rp->p_nextready = NULL;
-
-        if (fila_fim)
-            fila_fim->p_nextready = rp; /* encadeia no fim da fila */
-        else
-            fila_inicio = rp;           /* primeiro processo */
-
-        fila_fim = rp;
-        return;                         
+        enqueue_tail(rp);
+    	return;                         
     }
 /* Add 'rp' to one of the queues of runnable processes.  This function is 
  * responsible for inserting a process into one of the scheduling queues. 
@@ -1706,6 +1699,15 @@ void enqueue(
  */
 static void enqueue_head(struct proc *rp)
 {
+	if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
+		assert(proc_is_runnable(rp));
+
+		rp->p_nextready = fila_inicio;
+		fila_inicio = rp;
+		if (!fila_fim)/* fila estava vazia */
+			fila_fim = rp;
+		return;
+	}
   const int q = rp->p_priority;	 		/* scheduling queue to use */
 
   struct proc **rdy_head, **rdy_tail;
@@ -1745,6 +1747,17 @@ static void enqueue_head(struct proc *rp)
 #if DEBUG_SANITYCHECKS
   assert(runqueues_ok_local());
 #endif
+}
+
+static void enqueue_tail(struct proc *rp)
+{
+    assert(proc_is_runnable(rp));
+    rp->p_nextready = NULL;
+    if (fila_fim)
+        fila_fim->p_nextready = rp;
+    else
+        fila_inicio = rp;
+    fila_fim = rp;
 }
 
 /*===========================================================================*

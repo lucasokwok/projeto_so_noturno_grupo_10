@@ -14,7 +14,7 @@
 #include <machine/archtypes.h>
 #include <limits.h>  
 
-int escalonador = 0;  /* 0 = Padrão, 1 = FCFS, 2 = RR, 3 = Lottery */
+int escalonador = 3;  /* 0 = Padrão, 1 = FCFS, 2 = RR, 3 = Lottery */
 
 int fcfs_ativo(void)   { return escalonador == 1; }
 int rr_ativo(void)     { return escalonador == 2; }
@@ -327,10 +327,9 @@ static int schedule_process(struct schedproc * rmp, unsigned flags)
 	int err;
 	int new_prio, new_quantum, new_cpu, niced;
 
-	pick_cpu(rmp);
-
-	if (flags & SCHEDULE_CHANGE_PRIO)
+	if (flags & SCHEDULE_CHANGE_PRIO){
 		new_prio = rmp->priority;
+	}
 	else
 		new_prio = -1;
 
@@ -339,8 +338,11 @@ static int schedule_process(struct schedproc * rmp, unsigned flags)
 	else
 		new_quantum = -1;
 
-	if (flags & SCHEDULE_CHANGE_CPU)
+	if (flags & SCHEDULE_CHANGE_CPU){
+		pick_cpu(rmp);
 		new_cpu = rmp->cpu;
+	}
+		
 	else
 		new_cpu = -1;
 
