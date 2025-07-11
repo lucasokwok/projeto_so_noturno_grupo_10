@@ -1930,15 +1930,31 @@ static struct proc * pick_proc(void)
    * If there are no processes ready to run, return NULL.
    */
   rdy_head = get_cpulocal_var(run_q_head);
-  for (q=0; q < NR_SCHED_QUEUES; q++) {	
-	if(!(rp = rdy_head[q])) {
-		TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
-		continue;
-	}
-	assert(proc_is_runnable(rp));
-	if (priv(rp)->s_flags & BILLABLE)	 	
-		get_cpulocal_var(bill_ptr) = rp; /* bill for system time */
-	return rp;
+  struct proc **rdy_tail = get_cpulocal_var(run_q_tail);
+
+  	for (q = 0; q < NR_SCHED_QUEUES; q++) {
+      struct proc *prev = NULL;
+      struct proc *cur  = rdy_head[q];
+
+      while (cur) {
+          if (!proc_is_runnable(cur)) {
+              
+              struct proc *next = cur->p_nextready;
+
+              if (prev)  prev->p_nextready = next;
+              else       rdy_head[q]       = next;
+
+              if (cur == rdy_tail[q]) rdy_tail[q] = prev;
+
+              cur = next;      
+              continue;
+          }
+
+          rp = cur;
+          if (priv(rp)->s_flags & BILLABLE)
+              get_cpulocal_var(bill_ptr) = rp;
+          return rp;
+      }
   }
   return NULL;
 }
