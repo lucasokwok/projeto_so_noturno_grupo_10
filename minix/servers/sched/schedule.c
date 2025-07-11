@@ -382,6 +382,9 @@ void init_scheduling(void)
  */
 void balance_queues(void)
 {
+	if (fcfs_ativo() || rr_ativo() || lottery_ativo())
+        return;  
+	
 	struct schedproc *rmp;
 	int r, proc_nr;
 

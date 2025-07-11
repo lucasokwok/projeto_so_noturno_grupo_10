@@ -55,13 +55,14 @@ static int lottery_ativo(void){ return escalonador_global  == 3; }
 
 static struct proc *fila_inicio = NULL; //inicio fila
 static struct proc *fila_fim = NULL; //fim fila
+static spinlock_t fila_lock = SPINLOCK_UNLOCKED;
 
-static unsigned seed = 123456789;          
+static unsigned seed = 123456789;
 
-static inline unsigned sorteia(unsigned total)   
+static inline unsigned sorteia(unsigned total)
 {
-    seed = seed * 1664525u + 1013904223u;        
-    return (seed >> 16) % total;              
+    seed = seed * 1664525u + 1013904223u;
+    return (seed >> 16) % total;
 }
 
 
@@ -181,6 +182,8 @@ void proc_init(void)
 		ip->p_rts_flags |= RTS_PROC_STOP;
 		set_idle_name(ip->p_name, i);
 	}
+
+	fila_inicio = fila_fim = NULL;//inicializa fila
 }
 
 static void switch_address_space_idle(void)
@@ -1621,10 +1624,18 @@ void enqueue(
   register struct proc *rp	/* this process is now runnable */
 )
 {
-	 /* ---------- FCFS e RR---------- */
-    if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
+    if ((fcfs_ativo() || rr_ativo() || lottery_ativo()) &&
+        rp->p_priority >= USER_Q) {
+
+        spinlock_lock(&fila_lock);
+#ifdef DEBUG
+        /* checa duplicata, uma vez aconteceu PANIC com mensagem de erro de proc duplicado na fila*/
+        for (struct proc *cur = fila_inicio; cur; cur = cur->p_nextready)
+            assert(cur != rp);
+#endif
         enqueue_tail(rp);
-    	return;                         
+        spinlock_unlock(&fila_lock);
+        return;
     }
 /* Add 'rp' to one of the queues of runnable processes.  This function is 
  * responsible for inserting a process into one of the scheduling queues. 
@@ -1636,10 +1647,6 @@ void enqueue(
  */
   int q = rp->p_priority;	 		/* scheduling queue to use */
   struct proc **rdy_head, **rdy_tail;
-  
-  assert(proc_is_runnable(rp));
-
-  assert(q >= 0);
 
   rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
   rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
@@ -1668,6 +1675,9 @@ void enqueue(
 			  (priv(p)->s_flags & PREEMPTIBLE))
 		  RTS_SET(p, RTS_PREEMPTED); /* calls dequeue() */
   }
+
+  spinlock_unlock(&fila_lock);
+
 #ifdef CONFIG_SMP
   /*
    * if the process was enqueued on a different cpu and the cpu is idle, i.e.
@@ -1699,15 +1709,16 @@ void enqueue(
  */
 static void enqueue_head(struct proc *rp)
 {
-	if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
-		assert(proc_is_runnable(rp));
+	spinlock_lock(&fila_lock);
+    
+    if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
+        rp->p_nextready = fila_inicio;
+        fila_inicio = rp;
+        if (!fila_fim) fila_fim = rp;
+        spinlock_unlock(&fila_lock);
+        return;
+    }
 
-		rp->p_nextready = fila_inicio;
-		fila_inicio = rp;
-		if (!fila_fim)/* fila estava vazia */
-			fila_fim = rp;
-		return;
-	}
   const int q = rp->p_priority;	 		/* scheduling queue to use */
 
   struct proc **rdy_head, **rdy_tail;
@@ -1744,6 +1755,8 @@ static void enqueue_head(struct proc *rp)
   rp->p_accounting.dequeues--;
   rp->p_accounting.preempted++;
 
+  spinlock_unlock(&fila_lock);
+
 #if DEBUG_SANITYCHECKS
   assert(runqueues_ok_local());
 #endif
@@ -1751,12 +1764,12 @@ static void enqueue_head(struct proc *rp)
 
 static void enqueue_tail(struct proc *rp)
 {
-    assert(proc_is_runnable(rp));
-    rp->p_nextready = NULL;
-    if (fila_fim)
+    rp->p_nextready = NULL;//aqui rp ja é garantido runnable
+    if (fila_fim) {
         fila_fim->p_nextready = rp;
-    else
+    } else {
         fila_inicio = rp;
+    }
     fila_fim = rp;
 }
 
@@ -1766,26 +1779,25 @@ static void enqueue_tail(struct proc *rp)
 void dequeue(struct proc *rp)
 /* this process is no longer runnable */
 {
-	/* ---------- FCFS e RR---------- */
-    if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
-        struct proc *ant = NULL, *cur = fila_inicio;
+	spinlock_lock(&fila_lock);
 
+	// FCFS/RR/Lottery usam fila unica global
+    if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
+        struct proc *prev = NULL, *cur = fila_inicio;
+        
         while (cur) {
             if (cur == rp) {
-                /* remove o proc*/
-                if (ant) 
-					ant->p_nextready = cur->p_nextready;
-                else     
-					fila_inicio = cur->p_nextready;
-
-                if (cur == fila_fim) 
-					fila_fim = ant;
+                if (prev) prev->p_nextready = cur->p_nextready;
+                else fila_inicio = cur->p_nextready;
+                
+                if (cur == fila_fim) fila_fim = prev;
                 break;
             }
-            ant = cur;
+            prev = cur;
             cur = cur->p_nextready;
         }
-        return;                         
+        spinlock_unlock(&fila_lock);
+        return;
     }
 /* A process must be removed from the scheduling queues, for example, because
  * it has blocked.  If the currently active process is removed, a new process
@@ -1845,6 +1857,8 @@ void dequeue(struct proc *rp)
   /* For ps(1), remember when the process was last dequeued. */
   rp->p_dequeued = get_monotonic();
 
+  spinlock_unlock(&fila_lock);
+
 #if DEBUG_SANITYCHECKS
   assert(runqueues_ok_local());
 #endif
@@ -1855,82 +1869,64 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
-	/* ---------- FCFS e RR---------- */
+	spinlock_lock(&fila_lock);
+    
+    // FCFS e RR 
     if (fcfs_ativo() || rr_ativo()) {
         struct proc *rp = fila_inicio;
-        if (!rp) return NULL;           /* fila vazia  */
-
-        fila_inicio = rp->p_nextready;
-        if (!fila_inicio) 
-			fila_fim = NULL;
-        rp->p_nextready = NULL;
-
-        if (priv(rp)->s_flags & BILLABLE)
-            get_cpulocal_var(bill_ptr) = rp;
-
+        if (rp) {
+            fila_inicio = rp->p_nextready;
+            if (!fila_inicio) fila_fim = NULL;
+            rp->p_nextready = NULL;
+            
+            if (priv(rp)->s_flags & BILLABLE)
+                get_cpulocal_var(bill_ptr) = rp;
+        }
+        spinlock_unlock(&fila_lock);
         return rp;
     }
-
-	if (lottery_ativo()) {
-        if (!fila_inicio) return NULL;
-
-        /* 1 bilhete por processo  */
+    
+    // Lot
+    if (lottery_ativo()) {
+        if (!fila_inicio) {
+            spinlock_unlock(&fila_lock);
+            return NULL;
+        }
+        
+        // count processos ativos
         int total = 0;
         struct proc *cur;
-        for (cur = fila_inicio; cur; cur = cur->p_nextready) 
-			total++;
-
-		if (total == 0)  
-        	return NULL;
-
-        /* sorteia [0, total-1] */
+        for (cur = fila_inicio; cur; cur = cur->p_nextready) {
+            total++;
+        }
+        
+        // sorteia um vencedor
         unsigned idx = sorteia(total);
-
-        /* varre ate o elemento escolhido */
-        struct proc *prev = NULL;
-        cur = fila_inicio;
-        prev = NULL;
-
-		while (cur) {
-
-			if (!proc_is_runnable(cur)) { /*verifica proc runnable se nao nao conta*/
-
-				if (prev != NULL) {
-					prev->p_nextready = cur->p_nextready;
-					cur = prev->p_nextready;       
-				} else {
-					fila_inicio = cur->p_nextready;
-					cur = fila_inicio;           
-				}
-
-				if (cur == NULL)
-					fila_fim = prev;
-
-				continue;                  
-			}
-
-			/* se achou o proximo proc (vencedor) para*/
-			if (idx == 0)
-				break;
-
-			idx--;                              
-			prev = cur;
-			cur  = cur->p_nextready;
-		}
-
-
-        if (prev) 
-			prev->p_nextready = cur->p_nextready;
-        else 
-			fila_inicio = cur->p_nextready;
-        if (cur == fila_fim) 
-			fila_fim = prev;
-        cur->p_nextready = NULL;
-
-        if (priv(cur)->s_flags & BILLABLE)
-            get_cpulocal_var(bill_ptr) = cur;
-        return cur;
+        struct proc *prev = NULL, *selected = fila_inicio;
+        
+        while (idx > 0 && selected) {
+            prev = selected;
+            selected = selected->p_nextready;
+            idx--;
+        }
+        
+        // remove o processo selecionado da fila
+        if (selected) {
+            if (prev) prev->p_nextready = selected->p_nextready;
+            else fila_inicio = selected->p_nextready;
+            
+            if (selected == fila_fim) fila_fim = prev;
+            selected->p_nextready = NULL;
+            
+            if (priv(selected)->s_flags & BILLABLE)
+                get_cpulocal_var(bill_ptr) = selected;
+        }
+        spinlock_unlock(&fila_lock);
+        return selected;
     }
+    
+    spinlock_unlock(&fila_lock);
+
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
  * clock task can tell who to bill for system time.
