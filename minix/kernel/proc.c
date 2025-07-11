@@ -1677,7 +1677,7 @@ void enqueue(
 		  RTS_SET(p, RTS_PREEMPTED); /* calls dequeue() */
   }
 
-  spinlock_unlock(&fila_lock);
+  //spinlock_unlock(&fila_lock);
 
 #ifdef CONFIG_SMP
   /*
