@@ -55,7 +55,7 @@ static int lottery_ativo(void){ return escalonador_global  == 3; }
 
 static struct proc *fila_inicio = NULL; //inicio fila
 static struct proc *fila_fim = NULL; //fim fila
-static spinlock_t fila_lock = SPINLOCK_UNLOCKED;
+static spinlock_t fila_lock;
 
 static unsigned seed = 123456789;
 
@@ -184,6 +184,7 @@ void proc_init(void)
 	}
 
 	fila_inicio = fila_fim = NULL;//inicializa fila
+	spinlock_init(&fila_lock); //inicializa destravdo
 }
 
 static void switch_address_space_idle(void)
