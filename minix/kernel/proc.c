@@ -1710,9 +1710,11 @@ void enqueue(
  */
 static void enqueue_head(struct proc *rp)
 {
-	spinlock_lock(&fila_lock);
     
     if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
+		
+		spinlock_lock(&fila_lock);
+
         rp->p_nextready = fila_inicio;
         fila_inicio = rp;
         if (!fila_fim) fila_fim = rp;
@@ -1756,8 +1758,6 @@ static void enqueue_head(struct proc *rp)
   rp->p_accounting.dequeues--;
   rp->p_accounting.preempted++;
 
-  spinlock_unlock(&fila_lock);
-
 #if DEBUG_SANITYCHECKS
   assert(runqueues_ok_local());
 #endif
@@ -1780,12 +1780,13 @@ static void enqueue_tail(struct proc *rp)
 void dequeue(struct proc *rp)
 /* this process is no longer runnable */
 {
-	spinlock_lock(&fila_lock);
 
 	// FCFS/RR/Lottery usam fila unica global
     if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
         struct proc *prev = NULL, *cur = fila_inicio;
-        
+		
+		spinlock_lock(&fila_lock);
+
         while (cur) {
             if (cur == rp) {
                 if (prev) prev->p_nextready = cur->p_nextready;
@@ -1858,8 +1859,6 @@ void dequeue(struct proc *rp)
   /* For ps(1), remember when the process was last dequeued. */
   rp->p_dequeued = get_monotonic();
 
-  spinlock_unlock(&fila_lock);
-
 #if DEBUG_SANITYCHECKS
   assert(runqueues_ok_local());
 #endif
@@ -1870,63 +1869,51 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
-	spinlock_lock(&fila_lock);
-    
-    // FCFS e RR 
-    if (fcfs_ativo() || rr_ativo()) {
-        struct proc *rp = fila_inicio;
-        if (rp) {
-            fila_inicio = rp->p_nextready;
-            if (!fila_inicio) fila_fim = NULL;
-            rp->p_nextready = NULL;
-            
-            if (priv(rp)->s_flags & BILLABLE)
-                get_cpulocal_var(bill_ptr) = rp;
+	struct proc *rp = NULL;
+
+    if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
+        spinlock_lock(&fila_lock);
+
+        if (fcfs_ativo() || rr_ativo()) {
+
+            rp = fila_inicio;
+            if (rp) {
+                fila_inicio = rp->p_nextready;
+                if (!fila_inicio) fila_fim = NULL;
+                rp->p_nextready = NULL;
+            }
+        } else {                    /*entao é lottery*/
+            if (fila_inicio) {
+                /* count procs*/
+                unsigned total = 0;
+                for (struct proc *c = fila_inicio; c; c = c->p_nextready)
+                    total++;
+
+                unsigned idx = sorteia(total);
+
+                /* remove o sorteado*/
+                struct proc *prev = NULL, *sel = fila_inicio;
+                while (idx--) { prev = sel; sel = sel->p_nextready; }
+
+                if (prev) 
+					prev->p_nextready = sel->p_nextready;
+                else 
+					fila_inicio = sel->p_nextready;
+                if (sel == fila_fim) 
+					fila_fim = prev;
+                sel->p_nextready = NULL;
+                rp = sel;
+            }
         }
+
+        if (rp && (priv(rp)->s_flags & BILLABLE))
+            get_cpulocal_var(bill_ptr) = rp;
+
         spinlock_unlock(&fila_lock);
-        return rp;
+
+        if (rp)          
+            return rp;
     }
-    
-    // Lot
-    if (lottery_ativo()) {
-        if (!fila_inicio) {
-            spinlock_unlock(&fila_lock);
-            return NULL;
-        }
-        
-        // count processos ativos
-        int total = 0;
-        struct proc *cur;
-        for (cur = fila_inicio; cur; cur = cur->p_nextready) {
-            total++;
-        }
-        
-        // sorteia um vencedor
-        unsigned idx = sorteia(total);
-        struct proc *prev = NULL, *selected = fila_inicio;
-        
-        while (idx > 0 && selected) {
-            prev = selected;
-            selected = selected->p_nextready;
-            idx--;
-        }
-        
-        // remove o processo selecionado da fila
-        if (selected) {
-            if (prev) prev->p_nextready = selected->p_nextready;
-            else fila_inicio = selected->p_nextready;
-            
-            if (selected == fila_fim) fila_fim = prev;
-            selected->p_nextready = NULL;
-            
-            if (priv(selected)->s_flags & BILLABLE)
-                get_cpulocal_var(bill_ptr) = selected;
-        }
-        spinlock_unlock(&fila_lock);
-        return selected;
-    }
-    
-    spinlock_unlock(&fila_lock);
 
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
