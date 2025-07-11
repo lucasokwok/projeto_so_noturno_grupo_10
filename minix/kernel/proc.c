@@ -1880,6 +1880,9 @@ static struct proc * pick_proc(void)
         for (cur = fila_inicio; cur; cur = cur->p_nextready) 
 			total++;
 
+		if (total == 0)  
+        	return NULL;
+
         /* sorteia [0, total-1] */
         unsigned idx = sorteia(total);
 
@@ -1887,7 +1890,30 @@ static struct proc * pick_proc(void)
         struct proc *prev = NULL;
         cur = fila_inicio;
         prev = NULL;
-		for (unsigned i = 0; i < idx; i++) {
+
+		while (cur) {
+
+			if (!proc_is_runnable(cur)) { /*verifica proc runnable se nao nao conta*/
+
+				if (prev != NULL) {
+					prev->p_nextready = cur->p_nextready;
+					cur = prev->p_nextready;       
+				} else {
+					fila_inicio = cur->p_nextready;
+					cur = fila_inicio;           
+				}
+
+				if (cur == NULL)
+					fila_fim = prev;
+
+				continue;                  
+			}
+
+			/* se achou o proximo proc (vencedor) para*/
+			if (idx == 0)
+				break;
+
+			idx--;                              
 			prev = cur;
 			cur  = cur->p_nextready;
 		}
