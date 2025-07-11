@@ -1626,7 +1626,7 @@ void enqueue(
 )
 {
     if ((fcfs_ativo() || rr_ativo() || lottery_ativo()) &&
-        rp->p_priority >= USER_Q) {
+        rp->p_priority >= USER_Q && (priv(rp)->s_flags & BILLABLE)) {
 
         spinlock_lock(&fila_lock);
 #ifdef DEBUG
