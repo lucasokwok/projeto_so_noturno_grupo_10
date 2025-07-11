@@ -1869,7 +1869,7 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
-	struct proc *rp = NULL;
+	register struct proc *rp = NULL;
 
     if (fcfs_ativo() || rr_ativo() || lottery_ativo()) {
         spinlock_lock(&fila_lock);
@@ -1921,7 +1921,7 @@ static struct proc * pick_proc(void)
  *
  * This function always uses the run queues of the local cpu!
  */
-  register struct proc *rp;			/* process to run */
+  //register struct proc *rp;			/* process to run */
   struct proc **rdy_head;
   int q;				/* iterate over queues */
 
