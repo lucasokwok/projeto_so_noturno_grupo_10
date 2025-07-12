@@ -65,7 +65,10 @@ static void rebuild_lottery_counters(void)
 {
     int q;
     struct proc *p;
-
+    
+    total_tickets = 0;
+    memset(tickets_per_queue, 0, sizeof(tickets_per_queue));
+    
     for (q = 0; q < NR_SCHED_QUEUES; q++) {
         unsigned peso = (NR_SCHED_QUEUES - 1 - q);
         for (p = get_cpulocal_var(run_q_head)[q]; p; p = p->p_nextready) {
@@ -74,7 +77,9 @@ static void rebuild_lottery_counters(void)
                 total_tickets        += peso;
             }
         }
+        kprintf("Lottery: Queue %d has %u tickets\n", q, tickets_per_queue[q]);
     }
+    kprintf("Lottery: Rebuilt counters, total_tickets=%u\n", total_tickets);
 }
 
 static inline void add_ticket(int q) /*adicionados pois contar a cada processo demora muito*/
@@ -234,8 +239,11 @@ void proc_init(void)
 		set_idle_name(ip->p_name, i);
 	}
 
-	if (lottery_ativo())
-    	rebuild_lottery_counters();
+	if (lottery_ativo()) {
+        total_tickets = 0;
+        memset(tickets_per_queue, 0, sizeof(tickets_per_queue));//forca reconstruca dos tickets
+        rebuild_lottery_counters();
+    }
 }
 
 static void switch_address_space_idle(void)
@@ -1897,54 +1905,61 @@ static struct proc * pick_proc(void)
 
 	if (fcfs_ativo() || rr_ativo()){
 		return fila_pop();
-	}else if (lottery_ativo()) {
-
-		if (total_tickets == 0) {                      
-			/* escolhe a fila com maiorprioridade se nao tiver ticket ainda*/
-			for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
-				rp = rdy_head[q];
-				if (rp && proc_is_runnable(rp))
-					break;
-			}
-			if (!rp)                           
-				rp = rdy_head[NR_SCHED_QUEUES - 1];
-			goto done;
-		}
-
-		unsigned sorteio = (rand_c() % total_tickets) + 1;
-
-		int q;
-		for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
-			if (sorteio <= tickets_per_queue[q]) break;
-			sorteio -= tickets_per_queue[q];
-		}
-
-		unsigned peso   = (NR_SCHED_QUEUES - 1 - q);
-		unsigned steps  = (sorteio - 1) / peso;      
-
-		struct proc *prev = NULL;
-		rp = rdy_head[q];
-		while (rp != NULL && steps-- > 0) { prev = rp; rp = rp->p_nextready; }
-
-		if (rp == NULL) {
-            return NULL;/*deu errado reinicia o sorteio*/
+	} else if (lottery_ativo()) {
+        /* usa filas originais se tickets zerados */
+		kprintf("Lottery: total_tickets=%u\n", total_tickets);
+        if (total_tickets == 0) {
+			kprintf("Lottery: Fallback to priority queues\n");
+            for (q = 0; q < NR_SCHED_QUEUES; q++) {
+                rp = rdy_head[q];
+                if (rp && proc_is_runnable(rp))
+                    goto done;
+            }
+            return NULL; 
         }
 
-		if (prev) prev->p_nextready = rp->p_nextready;
-		else      rdy_head[q]       = rp->p_nextready;
-		if (rp == rdy_tail[q])       rdy_tail[q] = prev;
-		rp->p_nextready = NULL;
+        /* faz sorteio */
+        unsigned sorteio = (rand_c() % total_tickets) + 1;
+        int q;
+        for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
+            if (sorteio <= tickets_per_queue[q]) break;
+            sorteio -= tickets_per_queue[q];
+        }
 
-		if (!proc_is_runnable(rp)) {
-            tickets_per_queue[q] += (NR_SCHED_QUEUES - 1 - q);
-            total_tickets        += (NR_SCHED_QUEUES - 1 - q);
+        unsigned peso = (NR_SCHED_QUEUES - 1 - q);
+        unsigned steps = (sorteio - 1) / peso;
+
+        struct proc *prev = NULL;
+        rp = rdy_head[q];
+        
+        while (rp != NULL && steps-- > 0) {
+            prev = rp;
+            rp = rp->p_nextready;
+        }
+
+        if (rp == NULL || !proc_is_runnable(rp)) {
+			kprintf("Lottery: Invalid proc selected! q=%d, steps=%u\n", q, steps);
+            // devolve tickets se deu errado
+            if (rp) {
+                tickets_per_queue[q] += peso;
+                total_tickets        += peso;
+            }
+            for (q = 0; q < NR_SCHED_QUEUES; q++) {
+                rp = rdy_head[q];
+                if (rp && proc_is_runnable(rp))
+                    goto done;
+            }
             return NULL;  
         }
 
-		del_ticket(q);
+        if (prev) prev->p_nextready = rp->p_nextready;
+        else      rdy_head[q]       = rp->p_nextready;
+        if (rp == rdy_tail[q]) rdy_tail[q] = prev;
+        rp->p_nextready = NULL;
 
-		goto done;
-	}
+        del_ticket(q);
+        goto done;
+    }
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
  * clock task can tell who to bill for system time.
