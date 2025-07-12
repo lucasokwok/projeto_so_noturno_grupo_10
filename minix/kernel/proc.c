@@ -33,6 +33,8 @@
 #include <signal.h>
 #include <assert.h>
 #include <string.h>
+#include <stdlib.h>  /* p/ rand() */
+#include <limits.h>  /*p/ INTMAX*/
 
 #include "vm.h"
 #include "clock.h"
@@ -40,6 +42,43 @@
 #include "arch_proto.h"
 
 #include <minix/syslib.h>
+
+static int escalonador = 3; /*0=padrao|1=FCFS|2=RR|3=Lottery*/
+
+static inline bool fcfs_ativo (void) { return escalonador == 1; }
+static inline bool rr_ativo (void) { return escalonador == 2; }
+static inline bool lottery_ativo(void) { return escalonador == 3; }
+
+/*fila para novos escalonadores*/
+static struct proc *fila_inicio = NULL;
+static struct proc *fila_fim    = NULL;
+
+static inline void fila_push(struct proc *rp)
+{
+    rp->p_nextready = NULL;
+    if (fila_fim)  
+		fila_fim->p_nextready = rp;
+    else           
+		fila_inicio = rp;
+    fila_fim = rp;
+}
+
+static inline struct proc *fila_pop(void)
+{
+    struct proc *rp = fila_inicio;
+    if (rp) {
+        fila_inicio = rp->p_nextready;
+        if (!fila_inicio) 
+			fila_fim = NULL;
+        rp->p_nextready = NULL;
+    }
+    return rp;
+}
+
+static unsigned sorteia(unsigned total)
+{
+    return (unsigned)(rand() % total);
+}
 
 /* Scheduling and message passing functions */
 static void idle(void);
@@ -156,6 +195,8 @@ void proc_init(void)
 		ip->p_rts_flags |= RTS_PROC_STOP;
 		set_idle_name(ip->p_name, i);
 	}
+	if (lottery_ativo())
+		srand((unsigned) get_uptime());/*seed p/ lottery*/
 }
 
 static void switch_address_space_idle(void)
@@ -1596,6 +1637,11 @@ void enqueue(
   register struct proc *rp	/* this process is now runnable */
 )
 {
+	if (fcfs_ativo() || rr_ativo() || lottery_ativo()){
+		fila_push(rp);//vai p outra fila
+		return;
+	}
+		
 /* Add 'rp' to one of the queues of runnable processes.  This function is 
  * responsible for inserting a process into one of the scheduling queues. 
  * The mechanism is implemented here.   The actual scheduling policy is
@@ -1716,6 +1762,21 @@ static void enqueue_head(struct proc *rp)
 void dequeue(struct proc *rp)
 /* this process is no longer runnable */
 {
+	if (fcfs_ativo() || rr_ativo() || lottery_ativo()){/*para tirar da fila*/
+		struct proc *prev = NULL, *cur = fila_inicio;
+		while (cur) {
+			if (cur == rp) {
+				if (prev) prev->p_nextready = cur->p_nextready;
+				else fila_inicio = cur->p_nextready;
+				if (cur == fila_fim) 
+					fila_fim = prev;
+				break;
+			}
+			prev = cur;
+			cur  = cur->p_nextready;
+		}
+		return;
+	}
 /* A process must be removed from the scheduling queues, for example, because
  * it has blocked.  If the currently active process is removed, a new process
  * is picked to run by calling pick_proc().
@@ -1784,6 +1845,30 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
+	if (fcfs_ativo() || rr_ativo()){
+		return fila_pop();
+	}else if (lottery_ativo()){
+		if (!fila_inicio) return NULL;
+
+        /* count processos*/
+        unsigned total = 0;
+        for (struct proc *p = fila_inicio; p; p = p->p_nextready) 
+			total++;
+
+        /* sorteia e tira processo*/
+        unsigned idx = sorteia(total);
+        struct proc *prev = NULL, *sel = fila_inicio;
+        while (idx--) { prev = sel; sel = sel->p_nextready; }
+
+        if (prev) 
+			prev->p_nextready = sel->p_nextready;
+        else 	
+			fila_inicio = sel->p_nextready;
+        if (sel == fila_fim) 
+			fila_fim = prev;
+        sel->p_nextready = NULL;
+        return sel;
+	}
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
  * clock task can tell who to bill for system time.
@@ -1892,6 +1977,11 @@ static void notify_scheduler(struct proc *p)
 
 void proc_no_time(struct proc * p)
 {
+	if(fcfs_ativo()){
+		p->p_cpu_time_left = ULONG_MAX;//pq nao eh preemptivo
+    	return;
+	}
+	
 	if (!proc_kernel_scheduler(p) && priv(p)->s_flags & PREEMPTIBLE) {
 		/* this dequeues the process */
 		notify_scheduler(p);

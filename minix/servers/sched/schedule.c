@@ -13,6 +13,12 @@
 #include <minix/com.h>
 #include <machine/archtypes.h>
 
+static int escalonador = 3; /*0=padrao|1=FCFS|2=RR|3=Lottery*/
+
+static inline bool fcfs_ativo (void) { return escalonador == 1; }
+static inline bool rr_ativo (void) { return escalonador == 2; }
+static inline bool lottery_ativo (void) { return escalonador == 3; }
+
 static unsigned balance_timeout;
 
 #define BALANCE_TIMEOUT	5 /* how often to balance queues in seconds */
@@ -96,6 +102,14 @@ int do_noquantum(message *m_ptr)
 	}
 
 	rmp = &schedproc[proc_nr_n];
+
+	if (rr_ativo() || lottery_ativo()){
+		if ((rv = schedule_process_local(rmp)) != OK) {
+			return rv;
+		}
+		return OK;//RR nao diminui prioridade e FCFS nao chega aqui pois quantum infinito
+	}
+
 	if (rmp->priority < MIN_USER_Q) {
 		rmp->priority += 1; /* lower priority */
 	}
@@ -171,8 +185,17 @@ int do_start_scheduling(message *m_ptr)
 	if (rmp->endpoint == rmp->parent) {
 		/* We have a special case here for init, which is the first
 		   process scheduled, and the parent of itself. */
-		rmp->priority   = USER_Q;
-		rmp->time_slice = DEFAULT_USER_TIME_SLICE;
+
+		if (fcfs_ativo()){
+			rmp->priority   = USER_Q;   
+			rmp->time_slice = ULONG_MAX;//quantum infinito       
+		}else if(rr_ativo()){
+			rmp->priority   = USER_Q;
+			rmp->time_slice = 10;    
+		}else{//lottery e padrao
+			rmp->priority   = USER_Q;
+			rmp->time_slice = DEFAULT_USER_TIME_SLICE;
+		}
 
 		/*
 		 * Since kernel never changes the cpu of a process, all are
