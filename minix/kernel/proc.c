@@ -1931,6 +1931,12 @@ static struct proc * pick_proc(void)
 		if (rp == rdy_tail[q])       rdy_tail[q] = prev;
 		rp->p_nextready = NULL;
 
+		if (!proc_is_runnable(rp)) {
+            tickets_per_queue[q] += (NR_SCHED_QUEUES - 1 - q);
+            total_tickets        += (NR_SCHED_QUEUES - 1 - q);
+            return NULL;  
+        }
+
 		del_ticket(q);
 
 		goto done;
