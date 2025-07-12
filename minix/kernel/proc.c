@@ -45,9 +45,9 @@
 
 static int escalonador = 3; /*0=padrao|1=FCFS|2=RR|3=Lottery*/
 
-static inline bool fcfs_ativo (void) { return escalonador == 1; }
-static inline bool rr_ativo (void) { return escalonador == 2; }
-static inline bool lottery_ativo(void) { return escalonador == 3; }
+static int fcfs_ativo (void) { return escalonador == 1; }
+static int rr_ativo (void) { return escalonador == 2; }
+static int lottery_ativo(void) { return escalonador == 3; }
 
 /*fila para novos escalonadores*/
 static struct proc *fila_inicio = NULL;
@@ -1981,7 +1981,7 @@ void proc_no_time(struct proc * p)
 		p->p_cpu_time_left = ULONG_MAX;//pq nao eh preemptivo
     	return;
 	}
-	
+
 	if (!proc_kernel_scheduler(p) && priv(p)->s_flags & PREEMPTIBLE) {
 		/* this dequeues the process */
 		notify_scheduler(p);
