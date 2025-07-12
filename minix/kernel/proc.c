@@ -1826,59 +1826,62 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc *pick_proc_lottery(void)
 {
-        /* process count*/
-        unsigned procs_ready[LOT_MAX_Q - LOT_MIN_Q + 1] = {0};
-        for (struct proc *p = BEG_PROC_ADDR; p < END_PROC_ADDR; ++p) {
-                if (isemptyp(p))               continue;         
-                if (priv(p)->s_flags & SYS_PROC) continue;       
-                if (!proc_is_runnable(p))      continue;         
-                if (p->p_priority <  LOT_MIN_Q ||
-                    p->p_priority >  LOT_MAX_Q) continue; /* fora de usuario*/
-                procs_ready[p->p_priority - LOT_MIN_Q]++;
+    /* process count*/
+    unsigned ready[LOT_MAX_Q - LOT_MIN_Q + 1] = {0};
+
+    for (int i = 0; i < NR_TASKS + NR_PROCS; i++) {
+        struct proc *p = &proc[i];
+
+        if (isemptyp(p))                        continue;    
+        if (priv(p)->s_flags & SYS_PROC)        continue;    
+        if (!proc_is_runnable(p))               continue;    /* nao runnable*/
+        if (p->p_priority < LOT_MIN_Q ||
+            p->p_priority > LOT_MAX_Q)          continue;    /* fora de usuario*/
+
+        ready[p->p_priority - LOT_MIN_Q]++;
+    }
+
+    unsigned tickets_total = 0;
+    unsigned tickets_q[LOT_MAX_Q - LOT_MIN_Q + 1] = {0};
+
+    for (int idx = 0; idx <= LOT_MAX_Q - LOT_MIN_Q; idx++) {
+        int q          = LOT_MIN_Q + idx;
+        tickets_q[idx] = LOT_WEIGHT(q) * ready[idx];
+        tickets_total += tickets_q[idx];
+    }
+
+    if (!tickets_total) return NULL;           
+
+    /*sorteia ticket*/
+    unsigned drawn = (rand_c() % tickets_total) + 1;
+
+    /* encontra sorteado*/
+    int target_q = -1;
+    for (int idx = 0; idx <= LOT_MAX_Q - LOT_MIN_Q; idx++) {
+        if (drawn > tickets_q[idx]) drawn -= tickets_q[idx];
+        else { target_q = LOT_MIN_Q + idx; break; }
+    }
+    if (target_q == -1) return NULL;           
+
+    struct proc **head = get_cpulocal_var(run_q_head);
+    struct proc *prev = NULL, *p = head[target_q];
+
+    while (p) {
+        drawn -= LOT_WEIGHT(target_q);
+        if (!drawn) {
+            /* remove p da fila*/
+            if (prev) prev->p_nextready = p->p_nextready;
+            else      head[target_q]    = p->p_nextready;
+
+            if (!head[target_q])
+                get_cpulocal_var(run_q_tail)[target_q] = prev;
+
+            p->p_nextready = NULL;
+            return p;                               /*vencedor eh selecionado para rodas*/
         }
-
-        unsigned tickets_total = 0;
-        unsigned tickets_q[LOT_MAX_Q - LOT_MIN_Q + 1] = {0};
-        for (int idx = 0; idx <= LOT_MAX_Q - LOT_MIN_Q; idx++) {
-                int q = LOT_MIN_Q + idx;
-                tickets_q[idx]  = LOT_WEIGHT(q) * procs_ready[idx];
-                tickets_total  += tickets_q[idx];
-        }
-        if (!tickets_total) return NULL;        
-
-        /*sorteia ticket*/
-        unsigned sorteio = (rand_c() % tickets_total) + 1;
-
-        /* encontra sorteado*/
-        int target_q = -1;
-        for (int idx = 0; idx <= LOT_MAX_Q - LOT_MIN_Q; idx++) {
-                if (sorteio > tickets_q[idx]) {
-                        sorteio -= tickets_q[idx];
-                } else {
-                        target_q = LOT_MIN_Q + idx;
-                        break;
-                }
-        }
-        if (target_q == -1) return NULL;       
-
-        struct proc **rdy_head = get_cpulocal_var(run_q_head);
-        struct proc  *prev = NULL, *p = rdy_head[target_q];
-        while (p) {
-                sorteio -= LOT_WEIGHT(target_q);
-                if (!sorteio) {
-                        /* remove p da fila*/
-                        if (prev) prev->p_nextready = p->p_nextready;
-                        else       rdy_head[target_q] = p->p_nextready;
-
-                        if (!rdy_head[target_q])
-                                get_cpulocal_var(run_q_tail)[target_q] = prev;
-
-                        p->p_nextready = NULL;
-                        return p; /*vencedor eh selecionado para rodas*/
-                }
-                prev = p; p = p->p_nextready;
-        }
-        return NULL;    
+        prev = p; p = p->p_nextready;
+    }
+    return NULL;    
 }
 
 /*===========================================================================*
