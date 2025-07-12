@@ -33,7 +33,6 @@
 #include <signal.h>
 #include <assert.h>
 #include <string.h>
-#include <stdlib.h>  /* p/ rand() */
 #include <limits.h>  /*p/ INTMAX*/
 
 #include "vm.h"
@@ -52,6 +51,24 @@ static int lottery_ativo(void) { return escalonador == 3; }
 /*fila para novos escalonadores*/
 static struct proc *fila_inicio = NULL;
 static struct proc *fila_fim    = NULL;
+
+static uint32_t estado_sorteador = 1;     
+
+static inline void sorteio_seed(uint32_t seed)
+{
+    estado_sorteador = seed ? seed : 1;   
+}
+
+static inline uint32_t sorteador(void)
+{
+    estado_sorteador = estado_sorteador * 1664525u + 1013904223u;
+    return estado_sorteador;
+}
+
+static unsigned sorteia(unsigned total)
+{
+    return (unsigned)(sorteador() % total);
+}
 
 static inline void fila_push(struct proc *rp)
 {
@@ -73,11 +90,6 @@ static inline struct proc *fila_pop(void)
         rp->p_nextready = NULL;
     }
     return rp;
-}
-
-static unsigned sorteia(unsigned total)
-{
-    return (unsigned)(rand() % total);
 }
 
 /* Scheduling and message passing functions */
@@ -198,7 +210,7 @@ void proc_init(void)
 	if (lottery_ativo()){
 		clock_t ticks;
 		getuptime(&ticks, NULL, NULL); //gera seed aleatoria
-		srand((unsigned) ticks);
+		sorteio_seed((unsigned) ticks);
 	}
 }
 
