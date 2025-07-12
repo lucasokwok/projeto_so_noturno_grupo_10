@@ -318,9 +318,6 @@ int do_nice(message *m_ptr)
         rmp->max_priority = rmp->priority = new_q;
     }
 
-	/* Update the proc entry and reschedule the process */
-	rmp->max_priority = rmp->priority = new_q;
-
 	if ((rv = schedule_process_local(rmp)) != OK) {
 		/* Something went wrong when rescheduling the process, roll
 		 * back the changes to proc struct */
