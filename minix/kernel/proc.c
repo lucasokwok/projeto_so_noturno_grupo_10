@@ -78,9 +78,9 @@ static void rebuild_lottery_counters(void)
                 total_tickets        += peso;
             }
         }
-        printf("Lottery: Queue %d has %u tickets\n", q, tickets_per_queue[q]);
+        //printf("Lottery: Queue %d has %u tickets\n", q, tickets_per_queue[q]);
     }
-    printf("Lottery: Rebuilt counters, total_tickets=%u\n", total_tickets);
+    //printf("Lottery: Rebuilt counters, total_tickets=%u\n", total_tickets);
 }
 
 static inline void add_ticket(int q) /*adicionados pois contar a cada processo demora muito*/
@@ -1908,9 +1908,9 @@ static struct proc * pick_proc(void)
 		return fila_pop();
 	} else if (lottery_ativo()) {
         /* usa filas originais se tickets zerados */
-		printf("Lottery: total_tickets=%u\n", total_tickets);
+		//printf("Lottery: total_tickets=%u\n", total_tickets);
         if (total_tickets == 0) {
-			printf("Lottery: Fallback to priority queues\n");
+			//printf("Lottery: Fallback to priority queues\n");
             for (q = 0; q < NR_SCHED_QUEUES; q++) {
                 rp = rdy_head[q];
                 if (rp && proc_is_runnable(rp))
@@ -1922,6 +1922,7 @@ static struct proc * pick_proc(void)
         /* faz sorteio */
         unsigned sorteio = (rand_c() % total_tickets) + 1;
         int q;
+		/*loop para encontrar em qual das filas o ticket caiu*/
         for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
             if (sorteio <= tickets_per_queue[q]) break;
             sorteio -= tickets_per_queue[q];
@@ -1932,14 +1933,15 @@ static struct proc * pick_proc(void)
 
         struct proc *prev = NULL;
         rp = rdy_head[q];
-        
+        /*percorre ate encontrar o sorteado*/
         while (rp != NULL && steps-- > 0) {
             prev = rp;
             rp = rp->p_nextready;
         }
 
+		/*verificacao de processos sorteado eh valido*/
         if (rp == NULL || !proc_is_runnable(rp)) {
-			printf("Lottery: Invalid proc selected! q=%d, steps=%u\n", q, steps);
+			//printf("Lottery: Invalid proc selected! q=%d, steps=%u\n", q, steps);
             // devolve tickets se deu errado
             if (rp) {
                 tickets_per_queue[q] += peso;
@@ -1953,6 +1955,7 @@ static struct proc * pick_proc(void)
             return NULL;  
         }
 
+		/*remove da fila*/
         if (prev) prev->p_nextready = rp->p_nextready;
         else      rdy_head[q]       = rp->p_nextready;
         if (rp == rdy_tail[q]) rdy_tail[q] = prev;
