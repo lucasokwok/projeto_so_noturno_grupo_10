@@ -1864,6 +1864,8 @@ static struct proc * pick_proc(void)
 		for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {     /* ignora fila IDLE */
 			unsigned peso = (NR_SCHED_QUEUES - 1 - q);  
 			for (rp = rdy_head[q]; rp; rp = rp->p_nextready)
+				if (!proc_is_runnable(rp))          /* ignora procs nao runnable */
+            		continue;
 				tickets += peso;                        
 		}
 
@@ -1880,6 +1882,17 @@ static struct proc * pick_proc(void)
             rp = rdy_head[q];
 
             while (rp) {
+				if (!proc_is_runnable(rp)) {
+					/* bloco para remover processos invalidos*/
+					if (prev) prev->p_nextready = rp->p_nextready;
+					else      rdy_head[q]       = rp->p_nextready;
+					if (rp == rdy_tail[q])       rdy_tail[q] = prev;
+					struct proc *victim = rp;
+					rp   = rp->p_nextready;
+					victim->p_nextready = NULL;
+					continue;                    
+				}
+				
                 if (sorteio <= peso) {
                     /* rp ganhou sai da fila*/
                     if (prev) prev->p_nextready = rp->p_nextready;
