@@ -195,8 +195,11 @@ void proc_init(void)
 		ip->p_rts_flags |= RTS_PROC_STOP;
 		set_idle_name(ip->p_name, i);
 	}
-	if (lottery_ativo())
-		srand((unsigned) get_uptime());/*seed p/ lottery*/
+	if (lottery_ativo()){
+		clock_t ticks;
+		getuptime(&ticks, NULL, NULL); //gera seed aleatoria
+		srand((unsigned) ticks);
+	}
 }
 
 static void switch_address_space_idle(void)
