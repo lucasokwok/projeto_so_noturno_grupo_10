@@ -42,7 +42,6 @@
 
 #include <minix/syslib.h>
 
-#include <minix/clock.h>   
 #include <stdint.h> 
 
 static int escalonador = 3; /*0=padrao|1=FCFS|2=RR|3=Lottery*/
