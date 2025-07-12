@@ -61,6 +61,22 @@ static unsigned long next = 1;
 static unsigned tickets_per_queue[NR_SCHED_QUEUES];   
 static unsigned total_tickets = 0;
 
+static void rebuild_lottery_counters(void)
+{
+    int q;
+    struct proc *p;
+
+    for (q = 0; q < NR_SCHED_QUEUES; q++) {
+        unsigned peso = (NR_SCHED_QUEUES - 1 - q);
+        for (p = get_cpulocal_var(run_q_head)[q]; p; p = p->p_nextready) {
+            if (proc_is_runnable(p)) {
+                tickets_per_queue[q] += peso;
+                total_tickets        += peso;
+            }
+        }
+    }
+}
+
 static inline void add_ticket(int q) /*adicionados pois contar a cada processo demora muito*/
 {
     unsigned peso = (NR_SCHED_QUEUES - 1 - q);
@@ -217,6 +233,9 @@ void proc_init(void)
 		ip->p_rts_flags |= RTS_PROC_STOP;
 		set_idle_name(ip->p_name, i);
 	}
+
+	if (lottery_ativo())
+    	rebuild_lottery_counters();
 }
 
 static void switch_address_space_idle(void)
@@ -1881,7 +1900,14 @@ static struct proc * pick_proc(void)
 	}else if (lottery_ativo()) {
 
 		if (total_tickets == 0) {                      
-			rp = rdy_head[NR_SCHED_QUEUES - 1];
+			/* escolhe a fila com maiorprioridade se nao tiver ticket ainda*/
+			for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
+				rp = rdy_head[q];
+				if (rp && proc_is_runnable(rp))
+					break;
+			}
+			if (!rp)                           
+				rp = rdy_head[NR_SCHED_QUEUES - 1];
 			goto done;
 		}
 
