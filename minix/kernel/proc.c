@@ -1853,14 +1853,16 @@ static struct proc * pick_proc(void)
 	int q;				/* iterate over queues */
 
 	rdy_head = get_cpulocal_var(run_q_head);
-	
+
 	if (fcfs_ativo() || rr_ativo()){
 		return fila_pop();
 	}else if (lottery_ativo()) {
 
         unsigned tickets = 0;
+		int *rq_count = get_cpulocal_var(run_q_numprocs);//mudou desde a versão 3.3
+		
         for (q = 0; q < NR_SCHED_QUEUES - 1; q++)           
-            tickets += nr_procs_rdy[q] * (NR_SCHED_QUEUES - 1 - q);
+            tickets += rq_count[q] * (NR_SCHED_QUEUES - 1 - q);
 
         if (tickets == 0) {
             rp = rdy_head[NR_SCHED_QUEUES - 1];
@@ -1870,7 +1872,7 @@ static struct proc * pick_proc(void)
         unsigned numrandom = (rand_c() % tickets) + 1;      
 
         for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
-            unsigned bucket = nr_procs_rdy[q] * (NR_SCHED_QUEUES - 1 - q);
+            unsigned bucket = rq_count[q] * (NR_SCHED_QUEUES - 1 - q);
             if (numrandom <= bucket) {
                 unsigned step = (NR_SCHED_QUEUES - 1 - q);      
                 unsigned i    = (numrandom - 1) / step;         
@@ -1880,9 +1882,7 @@ static struct proc * pick_proc(void)
             }
             numrandom -= bucket;
         }
-        if (rp && (priv(rp)->s_flags & BILLABLE))
-			get_cpulocal_var(bill_ptr) = rp;
-		return rp;
+		goto done;
     }
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
@@ -1902,6 +1902,11 @@ static struct proc * pick_proc(void)
 	return rp;
   }
   return NULL;
+  
+done: 
+	if (rp && (priv(rp)->s_flags & BILLABLE))
+		get_cpulocal_var(bill_ptr) = rp;
+	return rp;
 }
 
 /*===========================================================================*
