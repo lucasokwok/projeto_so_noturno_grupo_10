@@ -58,11 +58,6 @@ static struct proc *fila_fim    = NULL;
 
 static unsigned long next = 1;
 
-static inline void srand_c(unsigned int seed)
-{
-    next = seed ? seed : 1;  
-}
-
 static inline int rand_c(void)
 {
     return (int)((next = next * 1103515245u + 12345u) % ((unsigned long)RAND_MAX + 1u));
@@ -204,9 +199,6 @@ void proc_init(void)
 		/* must not let idle ever get scheduled */
 		ip->p_rts_flags |= RTS_PROC_STOP;
 		set_idle_name(ip->p_name, i);
-	}
-	if (lottery_ativo()){
-		srand_c((unsigned int) get_monotonic());
 	}
 }
 
@@ -1856,38 +1848,41 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
+	register struct proc *rp;			/* process to run */
+	struct proc **rdy_head;
+	int q;				/* iterate over queues */
+
+	rdy_head = get_cpulocal_var(run_q_head);
+	
 	if (fcfs_ativo() || rr_ativo()){
 		return fila_pop();
 	}else if (lottery_ativo()) {
 
-        /* 1. Soma total de bilhetes ------------------------------------ */
         unsigned tickets = 0;
-        for (q = 0; q < NR_SCHED_QUEUES - 1; q++)           /* ignora fila IDLE */
+        for (q = 0; q < NR_SCHED_QUEUES - 1; q++)           
             tickets += nr_procs_rdy[q] * (NR_SCHED_QUEUES - 1 - q);
 
-        /* Se não há ninguém pronto, devolve IDLE ----------------------- */
         if (tickets == 0) {
             rp = rdy_head[NR_SCHED_QUEUES - 1];
             goto done;
         }
 
-        /* 2. Sorteia bilhete vencedor ---------------------------------- */
-        unsigned numrandom = (rand_c() % tickets) + 1;      /* 1 .. tickets */
+        unsigned numrandom = (rand_c() % tickets) + 1;      
 
-        /* 3. Descobre em qual fila caiu ------------------------------- */
         for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
             unsigned bucket = nr_procs_rdy[q] * (NR_SCHED_QUEUES - 1 - q);
             if (numrandom <= bucket) {
-                /* 4. Dentro da fila, pega o processo correspondente ---- */
-                unsigned step = (NR_SCHED_QUEUES - 1 - q);      /* peso */
-                unsigned i    = (numrandom - 1) / step;         /* índice */
+                unsigned step = (NR_SCHED_QUEUES - 1 - q);      
+                unsigned i    = (numrandom - 1) / step;         
                 rp = rdy_head[q];
                 while (i--) rp = rp->p_nextready;
                 break;
             }
             numrandom -= bucket;
         }
-        goto done;
+        if (rp && (priv(rp)->s_flags & BILLABLE))
+			get_cpulocal_var(bill_ptr) = rp;
+		return rp;
     }
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
@@ -1895,15 +1890,7 @@ static struct proc * pick_proc(void)
  *
  * This function always uses the run queues of the local cpu!
  */
-  register struct proc *rp;			/* process to run */
-  struct proc **rdy_head;
-  int q;				/* iterate over queues */
-
-  /* Check each of the scheduling queues for ready processes. The number of
-   * queues is defined in proc.h, and priorities are set in the task table.
-   * If there are no processes ready to run, return NULL.
-   */
-  rdy_head = get_cpulocal_var(run_q_head);
+  
   for (q=0; q < NR_SCHED_QUEUES; q++) {	
 	if(!(rp = rdy_head[q])) {
 		TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
@@ -1915,11 +1902,6 @@ static struct proc * pick_proc(void)
 	return rp;
   }
   return NULL;
-  
-  done:
-    if (rp && (priv(rp)->s_flags & BILLABLE))
-        get_cpulocal_var(bill_ptr) = rp;
-    return rp;
 }
 
 /*===========================================================================*
