@@ -54,22 +54,17 @@ static int lottery_ativo(void) { return escalonador == 3; }
 static struct proc *fila_inicio = NULL;
 static struct proc *fila_fim    = NULL;
 
-static uint32_t estado_sorteador = 1;     
+static uint32_t estado_sorteador = 1;
 
-static inline void sorteio_seed(uint32_t seed)
+static void sorteador_seed(uint32_t seed)
 {
-    estado_sorteador = seed ? seed : 1;   
+    estado_sorteador = seed ? seed : 1;
 }
 
-static inline uint32_t sorteador(void)
+static uint32_t sorteia(void)       
 {
     estado_sorteador = estado_sorteador * 1664525u + 1013904223u;
     return estado_sorteador;
-}
-
-static unsigned sorteia(unsigned total)
-{
-    return (unsigned)(sorteador() % total);
 }
 
 static inline void fila_push(struct proc *rp)
@@ -210,9 +205,7 @@ void proc_init(void)
 		set_idle_name(ip->p_name, i);
 	}
 	if (lottery_ativo()){
-		clock_t ticks;
-		get_uptime(&ticks); //gera seed aleatoria
-		sorteio_seed((uint32_t) ticks);
+		sorteador_seed((uint32_t) get_monotonic());
 	}
 }
 
@@ -1873,7 +1866,7 @@ static struct proc * pick_proc(void)
 			total++;
 
         /* sorteia e tira processo*/
-        unsigned idx = sorteia(total);
+        unsigned idx = sorteia() % total_tickets; 
         struct proc *prev = NULL, *sel = fila_inicio;
         while (idx--) { prev = sel; sel = sel->p_nextready; }
 
