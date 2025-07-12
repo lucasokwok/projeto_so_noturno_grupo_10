@@ -1924,7 +1924,11 @@ static struct proc * pick_proc(void)
 
 		struct proc *prev = NULL;
 		rp = rdy_head[q];
-		while (steps--) { prev = rp; rp = rp->p_nextready; }
+		while (rp != NULL && steps-- > 0) { prev = rp; rp = rp->p_nextready; }
+
+		if (rp == NULL) {
+            return NULL;/*deu errado reinicia o sorteio*/
+        }
 
 		if (prev) prev->p_nextready = rp->p_nextready;
 		else      rdy_head[q]       = rp->p_nextready;
