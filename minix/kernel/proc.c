@@ -1848,11 +1848,13 @@ void dequeue(struct proc *rp)
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
-	register struct proc *rp;			/* process to run */
-	struct proc **rdy_head;
-	int q;				/* iterate over queues */
+	struct proc *rp = NULL;        
+    struct proc **rdy_head;        
+    struct proc **rdy_tail;        
+    int q;
 
-	rdy_head = get_cpulocal_var(run_q_head);
+    rdy_head = get_cpulocal_var(run_q_head);
+    rdy_tail = get_cpulocal_var(run_q_tail);
 
 	if (fcfs_ativo() || rr_ativo()){
 		return fila_pop();
@@ -1873,15 +1875,24 @@ static struct proc * pick_proc(void)
         unsigned numrandom = (rand_c() % tickets) + 1;      
 
         for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
-            unsigned bucket = rq_count[q] * (NR_SCHED_QUEUES - 1 - q);
-            if (numrandom <= bucket) {
-                unsigned step = (NR_SCHED_QUEUES - 1 - q);      
-                unsigned i    = (numrandom - 1) / step;         
-                rp = rdy_head[q];
-                while (i--) rp = rp->p_nextready;
-                break;
+            unsigned peso = (NR_SCHED_QUEUES - 1 - q);
+            struct proc *prev = NULL;
+            rp = rdy_head[q];
+
+            while (rp) {
+                if (sorteio <= peso) {
+                    /* rp ganhou sai da fila*/
+                    if (prev) prev->p_nextready = rp->p_nextready;
+                    else      rdy_head[q]       = rp->p_nextready;
+                    if (rp == rdy_tail[q])     
+                        rdy_tail[q] = prev;
+                    rp->p_nextready = NULL;
+                    goto done;
+                }
+                sorteio -= peso;
+                prev = rp;
+                rp   = rp->p_nextready;
             }
-            numrandom -= bucket;
         }
 		goto done;
     }
