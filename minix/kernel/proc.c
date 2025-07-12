@@ -33,7 +33,6 @@
 #include <signal.h>
 #include <assert.h>
 #include <string.h>
-#include <limits.h>  /*p/ INTMAX*/
 
 #include "vm.h"
 #include "clock.h"
@@ -41,88 +40,23 @@
 #include "arch_proto.h"
 
 #include <minix/syslib.h>
-#include <minix/sysutil.h>
 
-#include <stdint.h> 
+#define LOT_MIN_Q USER_Q /* 7 esta nos docs do minix*/
+#define LOT_MAX_Q MIN_USER_Q /* 14 */
+#define LOT_WEIGHT(q) (LOT_MAX_Q - (q) + 1) 
+#define RAND_MAX 0x7fffffff
 
-#define RAND_MAX  0x7fffffff /*nao temos acesso a biblioteca que tem rand()*/
+//static unsigned tickets_in_q[NR_SCHED_QUEUES]; 
+/*static unsigned total_tickets; removido pois dava erro em contagem, agora utilizando contagem a partir da tabela de processos*/
+static u_long next = 1;
 
-static int escalonador = 3; /*0=padrao|1=FCFS|2=RR|3=Lottery*/
+EXTERN struct proc proc[NR_TASKS + NR_PROCS]; /*tabela de processos para contar os processos de user*/
 
-static int fcfs_ativo (void) { return escalonador == 1; }
-static int rr_ativo (void) { return escalonador == 2; }
-static int lottery_ativo(void) { return escalonador == 3; }
-
-/*fila para novos escalonadores*/
-static struct proc *fila_inicio = NULL;
-static struct proc *fila_fim    = NULL;
-
-static unsigned long next = 1;
-
-static unsigned tickets_per_queue[NR_SCHED_QUEUES];   
-static unsigned total_tickets = 0;
-
-static void rebuild_lottery_counters(void)
+int rand_c(void) /*implementada ja que include de stdlib nao funciona*/
 {
-    int q;
-    struct proc *p;
-    
-    total_tickets = 0;
-    memset(tickets_per_queue, 0, sizeof(tickets_per_queue));
-    
-    for (q = 0; q < NR_SCHED_QUEUES; q++) {
-        unsigned peso = (NR_SCHED_QUEUES - 1 - q);
-        for (p = get_cpulocal_var(run_q_head)[q]; p; p = p->p_nextready) {
-            if (proc_is_runnable(p)) {
-                tickets_per_queue[q] += peso;
-                total_tickets        += peso;
-            }
-        }
-        //printf("Lottery: Queue %d has %u tickets\n", q, tickets_per_queue[q]);
-    }
-    //printf("Lottery: Rebuilt counters, total_tickets=%u\n", total_tickets);
+    return (int)((next = next * 1103515245 + 12345) % ((u_long)RAND_MAX + 1));
 }
 
-static inline void add_ticket(int q) /*adicionados pois contar a cada processo demora muito*/
-{
-    unsigned peso = (NR_SCHED_QUEUES - 1 - q);
-    tickets_per_queue[q] += peso;
-    total_tickets        += peso;
-}
-
-static inline void del_ticket(int q)
-{
-    unsigned peso = (NR_SCHED_QUEUES - 1 - q);
-    tickets_per_queue[q] -= peso;
-    total_tickets        -= peso;
-}
-
-static inline int rand_c(void)
-{
-    return (int)((next = next * 1103515245u + 12345u) % ((unsigned long)RAND_MAX + 1u));
-}
-
-static inline void fila_push(struct proc *rp)
-{
-    rp->p_nextready = NULL;
-    if (fila_fim)  
-		fila_fim->p_nextready = rp;
-    else           
-		fila_inicio = rp;
-    fila_fim = rp;
-}
-
-static inline struct proc *fila_pop(void)
-{
-    struct proc *rp = fila_inicio;
-    if (rp) {
-        fila_inicio = rp->p_nextready;
-        if (!fila_inicio) 
-			fila_fim = NULL;
-        rp->p_nextready = NULL;
-    }
-    return rp;
-}
 
 /* Scheduling and message passing functions */
 static void idle(void);
@@ -240,11 +174,8 @@ void proc_init(void)
 		set_idle_name(ip->p_name, i);
 	}
 
-	if (lottery_ativo()) {
-        total_tickets = 0;
-        memset(tickets_per_queue, 0, sizeof(tickets_per_queue));//forca reconstruca dos tickets
-        rebuild_lottery_counters();
-    }
+	/*memset(tickets_in_q, 0, sizeof(tickets_in_q));
+	total_tickets = 0;*/
 }
 
 static void switch_address_space_idle(void)
@@ -1685,11 +1616,6 @@ void enqueue(
   register struct proc *rp	/* this process is now runnable */
 )
 {
-	if (fcfs_ativo() || rr_ativo()){
-		fila_push(rp);//vai p outra fila
-		return;
-	}
-		
 /* Add 'rp' to one of the queues of runnable processes.  This function is 
  * responsible for inserting a process into one of the scheduling queues. 
  * The mechanism is implemented here.   The actual scheduling policy is
@@ -1708,6 +1634,14 @@ void enqueue(
   rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
   rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
 
+	/*
+  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) { incremeta contagem de tickets
+		unsigned w = LOT_WEIGHT(q);
+		tickets_in_q[q] += w;
+		total_tickets   += w;
+  }
+  */
+
   /* Now add the process to the queue. */
   if (!rdy_head[q]) {		/* add to empty queue */
       rdy_head[q] = rdy_tail[q] = rp; 		/* create a new queue */
@@ -1718,8 +1652,7 @@ void enqueue(
       rdy_tail[q] = rp;				/* set new queue tail */
       rp->p_nextready = NULL;		/* mark new end */
   }
-	if (lottery_ativo())
-			add_ticket(q);  
+
   if (cpuid == rp->p_cpu) {
 	  /*
 	   * enqueueing a process with a higher priority than the current one,
@@ -1782,7 +1715,13 @@ static void enqueue_head(struct proc *rp)
 
   rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
   rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
-
+/*
+  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) { incremeta contagem de tickets
+		unsigned w = LOT_WEIGHT(q);
+		tickets_in_q[q] += w;
+		total_tickets   += w;
+  }
+*/
   /* Now add the process to the queue. */
   if (!rdy_head[q]) {		/* add to empty queue */
 	rdy_head[q] = rdy_tail[q] = rp; 	/* create a new queue */
@@ -1811,21 +1750,6 @@ static void enqueue_head(struct proc *rp)
 void dequeue(struct proc *rp)
 /* this process is no longer runnable */
 {
-	if (fcfs_ativo() || rr_ativo() || lottery_ativo()){/*para tirar da fila*/
-		struct proc *prev = NULL, *cur = fila_inicio;
-		while (cur) {
-			if (cur == rp) {
-				if (prev) prev->p_nextready = cur->p_nextready;
-				else fila_inicio = cur->p_nextready;
-				if (cur == fila_fim) 
-					fila_fim = prev;
-				break;
-			}
-			prev = cur;
-			cur  = cur->p_nextready;
-		}
-		return;
-	}
 /* A process must be removed from the scheduling queues, for example, because
  * it has blocked.  If the currently active process is removed, a new process
  * is picked to run by calling pick_proc().
@@ -1859,12 +1783,18 @@ void dequeue(struct proc *rp)
           *xpp = (*xpp)->p_nextready;		/* replace with next chain */
           if (rp == rdy_tail[q]) {		/* queue tail removed */
               rdy_tail[q] = prev_xp;		/* set new tail */
-	  }
+	  	  }
 
-	  if (lottery_ativo())
-                del_ticket(q);
+		  /*
+		  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) {decrementa tickets
+			unsigned w = LOT_WEIGHT(q);
+			tickets_in_q[q] -= w;
+			total_tickets   -= w;
+		  }
+		  */
           break;
       }
+	  
       prev_xp = *xpp;				/* save previous in chain */
   }
 
@@ -1892,86 +1822,89 @@ void dequeue(struct proc *rp)
 }
 
 /*===========================================================================*
+ *				pick_proc_lottery Escalonador por loteria				     * 
+ *===========================================================================*/
+static struct proc *pick_proc_lottery(void)
+{
+    /* process count*/
+    unsigned ready[LOT_MAX_Q - LOT_MIN_Q + 1] = {0};
+
+    for (int i = 0; i < NR_TASKS + NR_PROCS; i++) {
+        struct proc *p = &proc[i];
+
+        if (isemptyp(p))                        continue;    
+        if (priv(p)->s_flags & SYS_PROC)        continue;    
+        if (!proc_is_runnable(p))               continue;    /* nao runnable*/
+        if (p->p_priority < LOT_MIN_Q ||
+            p->p_priority > LOT_MAX_Q)          continue;    /* fora de usuario*/
+
+        ready[p->p_priority - LOT_MIN_Q]++;
+    }
+
+    unsigned tickets_total = 0;
+    unsigned tickets_q[LOT_MAX_Q - LOT_MIN_Q + 1] = {0};
+
+    for (int idx = 0; idx <= LOT_MAX_Q - LOT_MIN_Q; idx++) {
+        int q          = LOT_MIN_Q + idx;
+        tickets_q[idx] = LOT_WEIGHT(q) * ready[idx];
+        tickets_total += tickets_q[idx];
+    }
+
+    if (!tickets_total) return NULL;           
+
+    /*sorteia ticket*/
+    unsigned drawn = (rand_c() % tickets_total) + 1;
+
+    /* encontra sorteado*/
+    int target_q = -1;
+    for (int idx = 0; idx <= LOT_MAX_Q - LOT_MIN_Q; idx++) {
+        if (drawn > tickets_q[idx]) drawn -= tickets_q[idx];
+        else { target_q = LOT_MIN_Q + idx; break; }
+    }
+    if (target_q == -1) return NULL;           
+
+    struct proc **head = get_cpulocal_var(run_q_head);
+    struct proc *prev = NULL, *p = head[target_q];
+
+    while (p) {
+        drawn -= LOT_WEIGHT(target_q);
+        if (!drawn) {
+            /* remove p da fila*/
+            if (prev) prev->p_nextready = p->p_nextready;
+            else      head[target_q]    = p->p_nextready;
+
+            if (!head[target_q])
+                get_cpulocal_var(run_q_tail)[target_q] = prev;
+
+            p->p_nextready = NULL;
+            return p;                               /*vencedor eh selecionado para rodas*/
+        }
+        prev = p; p = p->p_nextready;
+    }
+    return NULL;    
+}
+
+/*===========================================================================*
  *				pick_proc				     * 
  *===========================================================================*/
 static struct proc * pick_proc(void)
 {
-	struct proc *rp = NULL;        
-    struct proc **rdy_head;        
-    struct proc **rdy_tail;        
-    int q;
-
-    rdy_head = get_cpulocal_var(run_q_head);
-    rdy_tail = get_cpulocal_var(run_q_tail);
-
-	if (fcfs_ativo() || rr_ativo()){
-		return fila_pop();
-	} else if (lottery_ativo()) {
-        /* usa filas originais se tickets zerados */
-		//printf("Lottery: total_tickets=%u\n", total_tickets);
-        if (total_tickets == 0) {
-			//printf("Lottery: Fallback to priority queues\n");
-            for (q = 0; q < NR_SCHED_QUEUES; q++) {
-                rp = rdy_head[q];
-                if (rp && proc_is_runnable(rp))
-                    goto done;
-            }
-            return NULL; 
-        }
-
-        /* faz sorteio */
-        unsigned sorteio = (rand_c() % total_tickets) + 1;
-        int q;
-		/*loop para encontrar em qual das filas o ticket caiu*/
-        for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
-            if (sorteio <= tickets_per_queue[q]) break;
-            sorteio -= tickets_per_queue[q];
-        }
-
-        unsigned peso = (NR_SCHED_QUEUES - 1 - q);
-        unsigned steps = (sorteio - 1) / peso;
-
-        struct proc *prev = NULL;
-        rp = rdy_head[q];
-        /*percorre ate encontrar o sorteado*/
-        while (rp != NULL && steps-- > 0) {
-            prev = rp;
-            rp = rp->p_nextready;
-        }
-
-		/*verificacao de processos sorteado eh valido*/
-        if (rp == NULL || !proc_is_runnable(rp)) {
-			//printf("Lottery: Invalid proc selected! q=%d, steps=%u\n", q, steps);
-            // devolve tickets se deu errado
-            if (rp) {
-                tickets_per_queue[q] += peso;
-                total_tickets        += peso;
-            }
-            for (q = 0; q < NR_SCHED_QUEUES; q++) {
-                rp = rdy_head[q];
-                if (rp && proc_is_runnable(rp))
-                    goto done;
-            }
-            return NULL;  
-        }
-
-		/*remove da fila*/
-        if (prev) prev->p_nextready = rp->p_nextready;
-        else      rdy_head[q]       = rp->p_nextready;
-        if (rp == rdy_tail[q]) rdy_tail[q] = prev;
-        rp->p_nextready = NULL;
-
-        del_ticket(q);
-        goto done;
-    }
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
  * clock task can tell who to bill for system time.
  *
  * This function always uses the run queues of the local cpu!
  */
-  
-  for (q=0; q < NR_SCHED_QUEUES; q++) {	
+  register struct proc *rp;			/* process to run */
+  struct proc **rdy_head;
+  int q;				/* iterate over queues */
+
+  /* Check each of the scheduling queues for ready processes. The number of
+   * queues is defined in proc.h, and priorities are set in the task table.
+   * If there are no processes ready to run, return NULL.
+   */
+  rdy_head = get_cpulocal_var(run_q_head);
+  for (q=0; q < LOT_MIN_Q; q++) {	/*LOT_MIN_Q eh ate onde nao tem os de usuario*/
 	if(!(rp = rdy_head[q])) {
 		TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
 		continue;
@@ -1981,12 +1914,14 @@ static struct proc * pick_proc(void)
 		get_cpulocal_var(bill_ptr) = rp; /* bill for system time */
 	return rp;
   }
-  return NULL;
-  
-done: 
-	if (rp && (priv(rp)->s_flags & BILLABLE))
-		get_cpulocal_var(bill_ptr) = rp;
+
+  rp = pick_proc_lottery();/*processos em nivel de usuario vao p pickproclottery*/
+  if (rp) {
+	if (priv(rp)->s_flags & BILLABLE)
+			get_cpulocal_var(bill_ptr) = rp;
 	return rp;
+  }
+  return NULL;
 }
 
 /*===========================================================================*
@@ -2069,11 +2004,6 @@ static void notify_scheduler(struct proc *p)
 
 void proc_no_time(struct proc * p)
 {
-	if(fcfs_ativo()){
-		p->p_cpu_time_left = ULONG_MAX;//pq nao eh preemptivo
-    	return;
-	}
-
 	if (!proc_kernel_scheduler(p) && priv(p)->s_flags & PREEMPTIBLE) {
 		/* this dequeues the process */
 		notify_scheduler(p);
