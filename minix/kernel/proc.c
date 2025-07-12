@@ -58,6 +58,23 @@ static struct proc *fila_fim    = NULL;
 
 static unsigned long next = 1;
 
+static unsigned tickets_per_queue[NR_SCHED_QUEUES];   
+static unsigned total_tickets = 0;
+
+static inline void add_ticket(int q) /*adicionados pois contar a cada processo demora muito*/
+{
+    unsigned peso = (NR_SCHED_QUEUES - 1 - q);
+    tickets_per_queue[q] += peso;
+    total_tickets        += peso;
+}
+
+static inline void del_ticket(int q)
+{
+    unsigned peso = (NR_SCHED_QUEUES - 1 - q);
+    tickets_per_queue[q] -= peso;
+    total_tickets        -= peso;
+}
+
 static inline int rand_c(void)
 {
     return (int)((next = next * 1103515245u + 12345u) % ((unsigned long)RAND_MAX + 1u));
@@ -1673,7 +1690,8 @@ void enqueue(
       rdy_tail[q] = rp;				/* set new queue tail */
       rp->p_nextready = NULL;		/* mark new end */
   }
-
+	if (lottery_ativo())
+			add_ticket(q);  
   if (cpuid == rp->p_cpu) {
 	  /*
 	   * enqueueing a process with a higher priority than the current one,
@@ -1815,6 +1833,8 @@ void dequeue(struct proc *rp)
               rdy_tail[q] = prev_xp;		/* set new tail */
 	  }
 
+	  if (lottery_ativo())
+                del_ticket(q);
           break;
       }
       prev_xp = *xpp;				/* save previous in chain */
@@ -1860,55 +1880,35 @@ static struct proc * pick_proc(void)
 		return fila_pop();
 	}else if (lottery_ativo()) {
 
-        unsigned tickets = 0;
-		for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {     /* ignora fila IDLE */
-			unsigned peso = (NR_SCHED_QUEUES - 1 - q);  
-			for (rp = rdy_head[q]; rp; rp = rp->p_nextready)
-				if (!proc_is_runnable(rp))          /* ignora procs nao runnable */
-            		continue;
-				tickets += peso;                        
+		if (total_tickets == 0) {                      
+			rp = rdy_head[NR_SCHED_QUEUES - 1];
+			goto done;
 		}
 
-        if (tickets == 0) {
-            rp = rdy_head[NR_SCHED_QUEUES - 1];
-            goto done;
-        }
+		unsigned sorteio = (rand_c() % total_tickets) + 1;
 
-        unsigned sorteio = (rand_c() % tickets) + 1;      
+		int q;
+		for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
+			if (sorteio <= tickets_per_queue[q]) break;
+			sorteio -= tickets_per_queue[q];
+		}
 
-        for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
-            unsigned peso = (NR_SCHED_QUEUES - 1 - q);
-            struct proc *prev = NULL;
-            rp = rdy_head[q];
+		unsigned peso   = (NR_SCHED_QUEUES - 1 - q);
+		unsigned steps  = (sorteio - 1) / peso;      
 
-            while (rp) {
-				if (!proc_is_runnable(rp)) {
-					/* bloco para remover processos invalidos*/
-					if (prev) prev->p_nextready = rp->p_nextready;
-					else      rdy_head[q]       = rp->p_nextready;
-					if (rp == rdy_tail[q])       rdy_tail[q] = prev;
-					struct proc *victim = rp;
-					rp   = rp->p_nextready;
-					victim->p_nextready = NULL;
-					continue;                    
-				}
-				
-                if (sorteio <= peso) {
-                    /* rp ganhou sai da fila*/
-                    if (prev) prev->p_nextready = rp->p_nextready;
-                    else      rdy_head[q]       = rp->p_nextready;
-                    if (rp == rdy_tail[q])     
-                        rdy_tail[q] = prev;
-                    rp->p_nextready = NULL;
-                    goto done;
-                }
-                sorteio -= peso;
-                prev = rp;
-                rp   = rp->p_nextready;
-            }
-        }
+		struct proc *prev = NULL;
+		rp = rdy_head[q];
+		while (steps--) { prev = rp; rp = rp->p_nextready; }
+
+		if (prev) prev->p_nextready = rp->p_nextready;
+		else      rdy_head[q]       = rp->p_nextready;
+		if (rp == rdy_tail[q])       rdy_tail[q] = prev;
+		rp->p_nextready = NULL;
+
+		del_ticket(q);
+
 		goto done;
-    }
+	}
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
  * clock task can tell who to bill for system time.
