@@ -301,6 +301,23 @@ int do_nice(message *m_ptr)
 	old_q     = rmp->priority;
 	old_max_q = rmp->max_priority;
 
+	if (fcfs_ativo()) {
+        return EPERM;/*nao permite alteracao de prioridade*/
+    }
+    else if (rr_ativo()) {
+        rmp->max_priority = new_q;
+        rmp->priority = new_q;
+        rmp->time_slice = DEFAULT_USER_TIME_SLICE;  
+    }
+    else if (lottery_ativo()) {
+        rmp->max_priority = new_q;
+        rmp->priority = new_q;
+        rmp->time_slice = DEFAULT_USER_TIME_SLICE; 
+    }
+    else {
+        rmp->max_priority = rmp->priority = new_q;
+    }
+
 	/* Update the proc entry and reschedule the process */
 	rmp->max_priority = rmp->priority = new_q;
 
