@@ -1872,7 +1872,7 @@ static struct proc * pick_proc(void)
             goto done;
         }
 
-        unsigned numrandom = (rand_c() % tickets) + 1;      
+        unsigned sorteio = (rand_c() % tickets) + 1;      
 
         for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
             unsigned peso = (NR_SCHED_QUEUES - 1 - q);
