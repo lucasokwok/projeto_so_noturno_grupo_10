@@ -1866,7 +1866,7 @@ static struct proc * pick_proc(void)
 			total++;
 
         /* sorteia e tira processo*/
-        unsigned idx = sorteia() % total_tickets; 
+        unsigned idx = sorteia() % total; 
         struct proc *prev = NULL, *sel = fila_inicio;
         while (idx--) { prev = sel; sel = sel->p_nextready; }
 
