@@ -44,6 +44,8 @@
 
 #include <stdint.h> 
 
+#define RAND_MAX  0x7fffffff /*nao temos acesso a biblioteca que tem rand()*/
+
 static int escalonador = 3; /*0=padrao|1=FCFS|2=RR|3=Lottery*/
 
 static int fcfs_ativo (void) { return escalonador == 1; }
@@ -54,17 +56,16 @@ static int lottery_ativo(void) { return escalonador == 3; }
 static struct proc *fila_inicio = NULL;
 static struct proc *fila_fim    = NULL;
 
-static uint32_t estado_sorteador = 1;
+static unsigned long next = 1;
 
-static void sorteador_seed(uint32_t seed)
+static inline void srand_c(unsigned int seed)
 {
-    estado_sorteador = seed ? seed : 1;
+    next = seed ? seed : 1;  
 }
 
-static uint32_t sorteia(void)       
+static inline int rand_c(void)
 {
-    estado_sorteador = estado_sorteador * 1664525u + 1013904223u;
-    return estado_sorteador;
+    return (int)((next = next * 1103515245u + 12345u) % ((unsigned long)RAND_MAX + 1u));
 }
 
 static inline void fila_push(struct proc *rp)
@@ -205,7 +206,7 @@ void proc_init(void)
 		set_idle_name(ip->p_name, i);
 	}
 	if (lottery_ativo()){
-		sorteador_seed((uint32_t) get_monotonic());
+		srand_c((unsigned int) get_monotonic());
 	}
 }
 
@@ -1647,7 +1648,7 @@ void enqueue(
   register struct proc *rp	/* this process is now runnable */
 )
 {
-	if (fcfs_ativo() || rr_ativo() || lottery_ativo()){
+	if (fcfs_ativo() || rr_ativo()){
 		fila_push(rp);//vai p outra fila
 		return;
 	}
@@ -1857,28 +1858,37 @@ static struct proc * pick_proc(void)
 {
 	if (fcfs_ativo() || rr_ativo()){
 		return fila_pop();
-	}else if (lottery_ativo()){
-		if (!fila_inicio) return NULL;
+	}else if (lottery_ativo()) {
 
-        /* count processos*/
-        unsigned total = 0;
-        for (struct proc *p = fila_inicio; p; p = p->p_nextready) 
-			total++;
+        /* 1. Soma total de bilhetes ------------------------------------ */
+        unsigned tickets = 0;
+        for (q = 0; q < NR_SCHED_QUEUES - 1; q++)           /* ignora fila IDLE */
+            tickets += nr_procs_rdy[q] * (NR_SCHED_QUEUES - 1 - q);
 
-        /* sorteia e tira processo*/
-        unsigned idx = sorteia() % total; 
-        struct proc *prev = NULL, *sel = fila_inicio;
-        while (idx--) { prev = sel; sel = sel->p_nextready; }
+        /* Se não há ninguém pronto, devolve IDLE ----------------------- */
+        if (tickets == 0) {
+            rp = rdy_head[NR_SCHED_QUEUES - 1];
+            goto done;
+        }
 
-        if (prev) 
-			prev->p_nextready = sel->p_nextready;
-        else 	
-			fila_inicio = sel->p_nextready;
-        if (sel == fila_fim) 
-			fila_fim = prev;
-        sel->p_nextready = NULL;
-        return sel;
-	}
+        /* 2. Sorteia bilhete vencedor ---------------------------------- */
+        unsigned numrandom = (rand_c() % tickets) + 1;      /* 1 .. tickets */
+
+        /* 3. Descobre em qual fila caiu ------------------------------- */
+        for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {
+            unsigned bucket = nr_procs_rdy[q] * (NR_SCHED_QUEUES - 1 - q);
+            if (numrandom <= bucket) {
+                /* 4. Dentro da fila, pega o processo correspondente ---- */
+                unsigned step = (NR_SCHED_QUEUES - 1 - q);      /* peso */
+                unsigned i    = (numrandom - 1) / step;         /* índice */
+                rp = rdy_head[q];
+                while (i--) rp = rp->p_nextready;
+                break;
+            }
+            numrandom -= bucket;
+        }
+        goto done;
+    }
 /* Decide who to run now.  A new process is selected and returned.
  * When a billable process is selected, record it in 'bill_ptr', so that the 
  * clock task can tell who to bill for system time.
@@ -1905,6 +1915,11 @@ static struct proc * pick_proc(void)
 	return rp;
   }
   return NULL;
+  
+  done:
+    if (rp && (priv(rp)->s_flags & BILLABLE))
+        get_cpulocal_var(bill_ptr) = rp;
+    return rp;
 }
 
 /*===========================================================================*
