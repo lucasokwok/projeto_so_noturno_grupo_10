@@ -41,6 +41,23 @@
 
 #include <minix/syslib.h>
 
+#define LOT_MIN_Q USER_Q /* 7 esta nos docs do minix*/
+#define LOT_MAX_Q MIN_USER_Q /* 14 */
+#define LOT_WEIGHT(q) (LOT_MAX_Q - (q) + 1) 
+#define RAND_MAX 0x7fffffff
+
+static unsigned tickets_in_q[NR_SCHED_QUEUES]; 
+static unsigned total_tickets;
+static u_long next = 1;
+
+//EXTERN struct proc proc[NR_TASKS + NR_PROCS]; /*tabela de processos para contar os processos de user*/
+
+int rand_c(void) /*implementada ja que include de stdlib nao funciona*/
+{
+    return (int)((next = next * 1103515245 + 12345) % ((u_long)RAND_MAX + 1));
+}
+
+
 /* Scheduling and message passing functions */
 static void idle(void);
 /**
@@ -156,6 +173,9 @@ void proc_init(void)
 		ip->p_rts_flags |= RTS_PROC_STOP;
 		set_idle_name(ip->p_name, i);
 	}
+
+	memset(tickets_in_q, 0, sizeof(tickets_in_q));
+	total_tickets = 0;
 }
 
 static void switch_address_space_idle(void)
@@ -1614,6 +1634,12 @@ void enqueue(
   rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
   rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
 
+  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) { /*incremeta contagem de tickets*/
+		unsigned w = LOT_WEIGHT(q);
+		tickets_in_q[q] += w;
+		total_tickets   += w;
+  }
+
   /* Now add the process to the queue. */
   if (!rdy_head[q]) {		/* add to empty queue */
       rdy_head[q] = rdy_tail[q] = rp; 		/* create a new queue */
@@ -1688,6 +1714,12 @@ static void enqueue_head(struct proc *rp)
   rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
   rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
 
+  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) { /*incremeta contagem de tickets*/
+		unsigned w = LOT_WEIGHT(q);
+		tickets_in_q[q] += w;
+		total_tickets   += w;
+  }
+
   /* Now add the process to the queue. */
   if (!rdy_head[q]) {		/* add to empty queue */
 	rdy_head[q] = rdy_tail[q] = rp; 	/* create a new queue */
@@ -1749,10 +1781,17 @@ void dequeue(struct proc *rp)
           *xpp = (*xpp)->p_nextready;		/* replace with next chain */
           if (rp == rdy_tail[q]) {		/* queue tail removed */
               rdy_tail[q] = prev_xp;		/* set new tail */
-	  }
+	  	  }
+
+		  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) {/*decrementa tickets*/
+			unsigned w = LOT_WEIGHT(q);
+			tickets_in_q[q] -= w;
+			total_tickets   -= w;
+		  }
 
           break;
       }
+	  
       prev_xp = *xpp;				/* save previous in chain */
   }
 
@@ -1779,6 +1818,43 @@ void dequeue(struct proc *rp)
 #endif
 }
 
+static struct proc *pick_proc_lottery(void)
+{
+        if (!total_tickets) return NULL;
+
+        unsigned sorteio = (rand_c() % total_tickets) + 1;
+        unsigned acc = 0;
+        int q;
+        struct proc **rdy_head = get_cpulocal_var(run_q_head);
+
+        for (q = LOT_MIN_Q; q <= LOT_MAX_Q; q++) {
+                acc += tickets_in_q[q];
+                if (sorteio > acc) continue;
+
+                /* percorrer fila q */
+                struct proc *prev = NULL, *p = rdy_head[q];
+                while (p) {
+                        sorteio -= LOT_WEIGHT(q);
+                        if (!sorteio) {
+                                /* retira p da fila */
+                                if (prev) prev->p_nextready = p->p_nextready;
+                                else      rdy_head[q]        = p->p_nextready;
+
+                                if (!rdy_head[q])
+                                        get_cpulocal_var(run_q_tail)[q] = prev;
+
+                                tickets_in_q[q] -= LOT_WEIGHT(q);
+                                total_tickets   -= LOT_WEIGHT(q);
+
+                                p->p_nextready = NULL;
+                                return p;
+                        }
+                        prev = p; p = p->p_nextready;
+                }
+        }
+        return NULL;        /* fallback */
+}
+
 /*===========================================================================*
  *				pick_proc				     * 
  *===========================================================================*/
@@ -1799,7 +1875,7 @@ static struct proc * pick_proc(void)
    * If there are no processes ready to run, return NULL.
    */
   rdy_head = get_cpulocal_var(run_q_head);
-  for (q=0; q < NR_SCHED_QUEUES; q++) {	
+  for (q=0; q < LOT_MIN_Q; q++) {	/*LOT_MIN_Q eh ate onde nao tem os de usuario*/
 	if(!(rp = rdy_head[q])) {
 		TRACE(VF_PICKPROC, printf("cpu %d queue %d empty\n", cpuid, q););
 		continue;
@@ -1807,6 +1883,13 @@ static struct proc * pick_proc(void)
 	assert(proc_is_runnable(rp));
 	if (priv(rp)->s_flags & BILLABLE)	 	
 		get_cpulocal_var(bill_ptr) = rp; /* bill for system time */
+	return rp;
+  }
+
+  rp = pick_proc_lottery();/*processos em nivel de usuario vao p pickproclottery*/
+  if (rp) {
+	if (priv(rp)->s_flags & BILLABLE)
+			get_cpulocal_var(bill_ptr) = rp;
 	return rp;
   }
   return NULL;
