@@ -46,11 +46,11 @@
 #define LOT_WEIGHT(q) (LOT_MAX_Q - (q) + 1) 
 #define RAND_MAX 0x7fffffff
 
-static unsigned tickets_in_q[NR_SCHED_QUEUES]; 
-static unsigned total_tickets;
+//static unsigned tickets_in_q[NR_SCHED_QUEUES]; 
+/*static unsigned total_tickets; removido pois dava erro em contagem, agora utilizando contagem a partir da tabela de processos*/
 static u_long next = 1;
 
-//EXTERN struct proc proc[NR_TASKS + NR_PROCS]; /*tabela de processos para contar os processos de user*/
+EXTERN struct proc proc[NR_TASKS + NR_PROCS]; /*tabela de processos para contar os processos de user*/
 
 int rand_c(void) /*implementada ja que include de stdlib nao funciona*/
 {
@@ -174,8 +174,8 @@ void proc_init(void)
 		set_idle_name(ip->p_name, i);
 	}
 
-	memset(tickets_in_q, 0, sizeof(tickets_in_q));
-	total_tickets = 0;
+	/*memset(tickets_in_q, 0, sizeof(tickets_in_q));
+	total_tickets = 0;*/
 }
 
 static void switch_address_space_idle(void)
@@ -1634,11 +1634,13 @@ void enqueue(
   rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
   rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
 
-  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) { /*incremeta contagem de tickets*/
+	/*
+  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) { incremeta contagem de tickets
 		unsigned w = LOT_WEIGHT(q);
 		tickets_in_q[q] += w;
 		total_tickets   += w;
   }
+  */
 
   /* Now add the process to the queue. */
   if (!rdy_head[q]) {		/* add to empty queue */
@@ -1713,13 +1715,13 @@ static void enqueue_head(struct proc *rp)
 
   rdy_head = get_cpu_var(rp->p_cpu, run_q_head);
   rdy_tail = get_cpu_var(rp->p_cpu, run_q_tail);
-
-  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) { /*incremeta contagem de tickets*/
+/*
+  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) { incremeta contagem de tickets
 		unsigned w = LOT_WEIGHT(q);
 		tickets_in_q[q] += w;
 		total_tickets   += w;
   }
-
+*/
   /* Now add the process to the queue. */
   if (!rdy_head[q]) {		/* add to empty queue */
 	rdy_head[q] = rdy_tail[q] = rp; 	/* create a new queue */
@@ -1783,12 +1785,13 @@ void dequeue(struct proc *rp)
               rdy_tail[q] = prev_xp;		/* set new tail */
 	  	  }
 
-		  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) {/*decrementa tickets*/
+		  /*
+		  if (q >= LOT_MIN_Q && q <= LOT_MAX_Q && !(priv(rp)->s_flags & SYS_PROC)) {decrementa tickets
 			unsigned w = LOT_WEIGHT(q);
 			tickets_in_q[q] -= w;
 			total_tickets   -= w;
 		  }
-
+		  */
           break;
       }
 	  
@@ -1818,41 +1821,64 @@ void dequeue(struct proc *rp)
 #endif
 }
 
+/*===========================================================================*
+ *				pick_proc_lottery Escalonador por loteria				     * 
+ *===========================================================================*/
 static struct proc *pick_proc_lottery(void)
 {
-        if (!total_tickets) return NULL;
+        /* process count*/
+        unsigned procs_ready[LOT_MAX_Q - LOT_MIN_Q + 1] = {0};
+        for (struct proc *p = BEG_PROC_ADDR; p < END_PROC_ADDR; ++p) {
+                if (isemptyp(p))               continue;         
+                if (priv(p)->s_flags & SYS_PROC) continue;       
+                if (!proc_is_runnable(p))      continue;         
+                if (p->p_priority <  LOT_MIN_Q ||
+                    p->p_priority >  LOT_MAX_Q) continue; /* fora de usuario*/
+                procs_ready[p->p_priority - LOT_MIN_Q]++;
+        }
 
-        unsigned sorteio = (rand_c() % total_tickets) + 1;
-        unsigned acc = 0;
-        int q;
-        struct proc **rdy_head = get_cpulocal_var(run_q_head);
+        unsigned tickets_total = 0;
+        unsigned tickets_q[LOT_MAX_Q - LOT_MIN_Q + 1] = {0};
+        for (int idx = 0; idx <= LOT_MAX_Q - LOT_MIN_Q; idx++) {
+                int q = LOT_MIN_Q + idx;
+                tickets_q[idx]  = LOT_WEIGHT(q) * procs_ready[idx];
+                tickets_total  += tickets_q[idx];
+        }
+        if (!tickets_total) return NULL;        
 
-        for (q = LOT_MIN_Q; q <= LOT_MAX_Q; q++) {
-                acc += tickets_in_q[q];
-                if (sorteio > acc) continue;
+        /*sorteia ticket*/
+        unsigned sorteio = (rand_c() % tickets_total) + 1;
 
-                /* percorrer fila q */
-                struct proc *prev = NULL, *p = rdy_head[q];
-                while (p) {
-                        sorteio -= LOT_WEIGHT(q);
-                        if (!sorteio) {
-                                /* retira p da fila */
-                                if (prev) prev->p_nextready = p->p_nextready;
-                                else      rdy_head[q]        = p->p_nextready;
-
-                                if (!rdy_head[q])
-                                        get_cpulocal_var(run_q_tail)[q] = prev;
-
-                                tickets_in_q[q] -= LOT_WEIGHT(q);
-                                total_tickets   -= LOT_WEIGHT(q);
-
-                                p->p_nextready = NULL;
-                                return p;
-                        }
-                        prev = p; p = p->p_nextready;
+        /* encontra sorteado*/
+        int target_q = -1;
+        for (int idx = 0; idx <= LOT_MAX_Q - LOT_MIN_Q; idx++) {
+                if (sorteio > tickets_q[idx]) {
+                        sorteio -= tickets_q[idx];
+                } else {
+                        target_q = LOT_MIN_Q + idx;
+                        break;
                 }
         }
-        return NULL;        /* fallback */
+        if (target_q == -1) return NULL;       
+
+        struct proc **rdy_head = get_cpulocal_var(run_q_head);
+        struct proc  *prev = NULL, *p = rdy_head[target_q];
+        while (p) {
+                sorteio -= LOT_WEIGHT(target_q);
+                if (!sorteio) {
+                        /* remove p da fila*/
+                        if (prev) prev->p_nextready = p->p_nextready;
+                        else       rdy_head[target_q] = p->p_nextready;
+
+                        if (!rdy_head[target_q])
+                                get_cpulocal_var(run_q_tail)[target_q] = prev;
+
+                        p->p_nextready = NULL;
+                        return p; /*vencedor eh selecionado para rodas*/
+                }
+                prev = p; p = p->p_nextready;
+        }
+        return NULL;    
 }
 
 /*===========================================================================*
