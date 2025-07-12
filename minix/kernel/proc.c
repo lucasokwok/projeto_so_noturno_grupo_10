@@ -42,6 +42,9 @@
 
 #include <minix/syslib.h>
 
+#include <minix/clock.h>   
+#include <stdint.h> 
+
 static int escalonador = 3; /*0=padrao|1=FCFS|2=RR|3=Lottery*/
 
 static int fcfs_ativo (void) { return escalonador == 1; }
@@ -209,8 +212,8 @@ void proc_init(void)
 	}
 	if (lottery_ativo()){
 		clock_t ticks;
-		getuptime(&ticks, NULL, NULL); //gera seed aleatoria
-		sorteio_seed((unsigned) ticks);
+		get_uptime(&ticks); //gera seed aleatoria
+		sorteio_seed((uint32_t) ticks);
 	}
 }
 
