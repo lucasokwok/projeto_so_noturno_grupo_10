@@ -41,6 +41,7 @@
 #include "arch_proto.h"
 
 #include <minix/syslib.h>
+#include <minix/sysutil.h>
 
 #include <stdint.h> 
 
@@ -77,9 +78,9 @@ static void rebuild_lottery_counters(void)
                 total_tickets        += peso;
             }
         }
-        kprintf("Lottery: Queue %d has %u tickets\n", q, tickets_per_queue[q]);
+        printf("Lottery: Queue %d has %u tickets\n", q, tickets_per_queue[q]);
     }
-    kprintf("Lottery: Rebuilt counters, total_tickets=%u\n", total_tickets);
+    printf("Lottery: Rebuilt counters, total_tickets=%u\n", total_tickets);
 }
 
 static inline void add_ticket(int q) /*adicionados pois contar a cada processo demora muito*/
@@ -1907,9 +1908,9 @@ static struct proc * pick_proc(void)
 		return fila_pop();
 	} else if (lottery_ativo()) {
         /* usa filas originais se tickets zerados */
-		kprintf("Lottery: total_tickets=%u\n", total_tickets);
+		printf("Lottery: total_tickets=%u\n", total_tickets);
         if (total_tickets == 0) {
-			kprintf("Lottery: Fallback to priority queues\n");
+			printf("Lottery: Fallback to priority queues\n");
             for (q = 0; q < NR_SCHED_QUEUES; q++) {
                 rp = rdy_head[q];
                 if (rp && proc_is_runnable(rp))
@@ -1938,7 +1939,7 @@ static struct proc * pick_proc(void)
         }
 
         if (rp == NULL || !proc_is_runnable(rp)) {
-			kprintf("Lottery: Invalid proc selected! q=%d, steps=%u\n", q, steps);
+			printf("Lottery: Invalid proc selected! q=%d, steps=%u\n", q, steps);
             // devolve tickets se deu errado
             if (rp) {
                 tickets_per_queue[q] += peso;
