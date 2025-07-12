@@ -1859,10 +1859,11 @@ static struct proc * pick_proc(void)
 	}else if (lottery_ativo()) {
 
         unsigned tickets = 0;
-		int *rq_count = get_cpulocal_var(run_q_numprocs);//mudou desde a versão 3.3
-		
-        for (q = 0; q < NR_SCHED_QUEUES - 1; q++)           
-            tickets += rq_count[q] * (NR_SCHED_QUEUES - 1 - q);
+		for (q = 0; q < NR_SCHED_QUEUES - 1; q++) {     /* ignora fila IDLE */
+			unsigned peso = (NR_SCHED_QUEUES - 1 - q);  
+			for (rp = rdy_head[q]; rp; rp = rp->p_nextready)
+				tickets += peso;                        
+		}
 
         if (tickets == 0) {
             rp = rdy_head[NR_SCHED_QUEUES - 1];
